@@ -351,6 +351,7 @@
         <div class="admin-tabs">
           <button class="admin-tab-btn active" id="adm-tab-orders" onclick="switchAdminTab('orders')">📋 Все заказы</button>
           <button class="admin-tab-btn" id="adm-tab-products" onclick="switchAdminTab('products')">🚰 Товары и цены</button>
+          <button class="admin-tab-btn" id="adm-tab-supplier" onclick="switchAdminTab('supplier')">🔄 Склад Поставщика (Минск / Москва)</button>
           <button class="admin-tab-btn" id="adm-tab-reels" onclick="switchAdminTab('reels')">🎬 Студия Reels / TikTok</button>
           <button class="admin-tab-btn" id="adm-tab-settings" onclick="switchAdminTab('settings')">⚙️ Настройки ИП, Пароль и Telegram</button>
         </div>
@@ -370,11 +371,79 @@
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:12px;">
               <h3>Каталог товаров (<span id="adminProductsCount">0</span> поз.)</h3>
               <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                <a href="/api/feed.xml" target="_blank" class="btn btn-outline btn-sm">📊 XML-фид для Kufar / Onliner</a>
                 <button class="btn btn-outline btn-sm" onclick="exportCatalogJson()">⬇ Скачать базу (JSON)</button>
                 <button class="btn btn-primary btn-sm" onclick="openProductEditor()">+ Добавить смеситель / аксессуар</button>
               </div>
             </div>
             <div id="adminProductsList"></div>
+          </div>
+        </div>
+
+        <!-- АДМИН ВКЛАДКА 2.5: АВТО-СКЛАД ПОСТАВЩИКА (МИНСК + МОСКВА) -->
+        <div id="admin-pane-supplier" style="display:none;">
+          <div class="grid-2">
+            <div class="card-box">
+              <h3 style="margin-bottom:8px;">🔄 Ежедневная синхронизация остатков Поставщика (Минск + Москва)</h3>
+              <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px;">
+                Загружайте ежедневный файл остатков от поставщика (CSV / таблица из Excel) или укажите постоянную ссылку на прайс-лист (Google Таблицы / XML / CSV). Система сама обновит наличие в Минске и Москве, переведет оптовые цены из RUB в BYN с вашей наценкой и создаст карточки для новинок!
+              </p>
+
+              <div class="grid-2">
+                <div class="form-group">
+                  <label class="form-label">Курс: BYN за 100 RUB (для прайсов из Москвы)</label>
+                  <input type="number" step="0.01" id="supRubRate" class="input-field" value="3.45" />
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Розничная наценка магазина (%)</label>
+                  <input type="number" id="supMarkup" class="input-field" value="30" />
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Вариант А: Прямая ссылка на автообновляемый прайс поставщика (Google Sheets CSV / URL)</label>
+                <input type="url" id="supFeedUrl" class="input-field" placeholder="https://docs.google.com/spreadsheets/d/.../export?format=csv" />
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Вариант Б: Загрузить файл (.csv / .txt) от поставщика с телефона или ПК</label>
+                <input type="file" accept=".csv,.txt" onchange="handleSupplierFileUpload(event)" style="font-size:13px; margin-bottom:8px;" />
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Или вставьте строки из Excel/CSV таблицы поставщика:</label>
+                <textarea id="supCsvInput" class="input-field" rows="6" style="font-family:monospace; font-size:12px;" placeholder="SKU;TITLE;WHOLESALE_PRICE;CURRENCY;STOCK_MINSK;STOCK_MOSCOW;CATEGORY;MATERIAL;COLOR"></textarea>
+              </div>
+
+              <label class="filter-option" style="margin-bottom:16px;">
+                <input type="checkbox" id="supUpdatePrices" checked /> Пересчитывать розничные цены в BYN по прайсу поставщика
+              </label>
+
+              <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                <button class="btn btn-primary" onclick="runSupplierSync()">🔄 Синхронизировать склад сейчас</button>
+                <button class="btn btn-outline btn-sm" onclick="fillDemoSupplierCsv()">⚡ Заполнить тестовую выгрузку поставщика (Минск + Москва)</button>
+              </div>
+
+              <div id="supplierSyncResultBox" style="margin-top:16px;"></div>
+            </div>
+
+            <div class="card-box">
+              <h3 style="margin-bottom:10px;">📦 Как это отображается покупателям на сайте</h3>
+              <div style="font-size:13px; color:var(--text-muted); display:flex; flex-direction:column; gap:12px;">
+                <div style="padding:12px; background:var(--bg-main); border-radius:8px; border-left:3px solid var(--success);">
+                  <strong style="color:var(--text-main);">1. Если товар есть на складе в Минске (stockMinsk &gt; 0):</strong><br/>
+                  На карточке горит зеленый статус: <code>✓ Минск: 14 шт. (Москва: 45 шт.)</code> — покупатель знает, что может забрать кран сегодня самовывозом или получить Европочтой за 1–2 дня.
+                </div>
+                <div style="padding:12px; background:var(--bg-main); border-radius:8px; border-left:3px solid #2563EB;">
+                  <strong style="color:var(--text-main);">2. Если в Минске 0 шт., но есть на складе в Москве (stockMoscow &gt; 0):</strong><br/>
+                  Товар не пропадает с сайта! На карточке автоматически включается статус: <code>🚚 Склад Москва: 24 шт. (Поставка в РБ 3–5 дней)</code>. Вы принимаете заказ и привозите позицию со следующей машиной поставщика.
+                </div>
+                <div style="padding:12px; background:var(--bg-main); border-radius:8px; border-left:3px solid var(--brass);">
+                  <strong style="color:var(--text-main);">3. Новые позиции в прайсе поставщика:</strong><br/>
+                  Если поставщик добавил в таблицу новый смеситель (новый артикул SKU), сайт автоматически создает для него карточку в каталоге, переводит цену из российских рублей (RUB) в белорусские (BYN) по вашему курсу и добавляет вашу розничную наценку!
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 

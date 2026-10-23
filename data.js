@@ -324,6 +324,8 @@ const DEFAULT_PRODUCTS = [
     spoutType: "Универсальная резьба М22/М24",
     warranty: "1 год",
     inStock: 45,
+    stockMinsk: 45,
+    stockMoscow: 120,
     isHit: true,
     image: "https://images.unsplash.com/photo-1584622781564-1d987f7333c1?auto=format&fit=crop&w=900&q=80",
     fallbackSvg: createProductSvg("Аэратор 720° Латунь", "#4B5260", "#C59B5F", "ТОП ПРОДАЖ TIKTOK", "29 BYN"),
@@ -335,6 +337,24 @@ const DEFAULT_PRODUCTS = [
     ]
   }
 ];
+
+// Проставляем склад Минск и склад Москва для всех стартовых позиций
+DEFAULT_PRODUCTS.forEach((p, idx) => {
+  if (p.stockMinsk === undefined) {
+    // Например, одна из позиций закончилась в Минске, но есть на складе поставщика в Москве
+    p.stockMinsk = idx === 3 ? 0 : p.inStock;
+    p.stockMoscow = idx === 3 ? 28 : Math.max(15, p.inStock * 3);
+    p.inStock = p.stockMinsk + p.stockMoscow;
+  }
+});
+
+// Пример ежедневной выгрузки от оптового поставщика (CSV/Excel формат: Артикул;Название;ОптЦена;Валюта;СкладМинск;СкладМосква;Категория;Материал;Цвет)
+const DEMO_SUPPLIER_CSV = `SKU;TITLE;WHOLESALE_PRICE;CURRENCY;STOCK_MINSK;STOCK_MOSCOW;CATEGORY;MATERIAL;COLOR
+AF-301-BLK;Смеситель для кухни 3-в-1 под фильтр питьевой воды Graphit Pro;265;BYN;19;45;faucets-filter;Латунь CW617N;Черный матовый / Графит
+AF-208-PULL;Смеситель кухонный с выдвижной лейкой и режимом «Водопад» SmartFlow;220;BYN;12;38;faucets-pullout;Нержавеющая сталь SUS304;Оружейная сталь (Gunmetal)
+AF-510-MAG;Профессиональный пружинный смеситель с магнитным держателем Chef Gastro;8400;RUB;0;24;faucets-pullout;Латунь CW617N;Черный матовый + Хром
+AF-770-SENSOR;Сенсорный кухонный смеситель Touchless Pro с выдвижным душем (Новинка поставщика);9200;RUB;5;30;faucets-pullout;Латунь CW617N;Темный графит (PVD)
+AF-880-SINKSET;Комплект: Кухонный смеситель 3-в-1 + Дозатор + Коландер (Black Edition);9800;RUB;4;18;faucets-filter;Латунь + Сталь SUS304;Черный матовый`;
 
 const DEFAULT_ORDERS = [
   {
@@ -377,6 +397,8 @@ if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     DEFAULT_STORE_SETTINGS,
     DEFAULT_PRODUCTS,
-    DEFAULT_ORDERS
+    DEFAULT_ORDERS,
+    DEMO_SUPPLIER_CSV,
+    createProductSvg
   };
 }

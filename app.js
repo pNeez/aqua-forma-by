@@ -380,6 +380,18 @@ function renderCatalog() {
   grid.innerHTML = filtered.map(p => renderProductCardHTML(p)).join("");
 }
 
+function getWarehouseBadgeHtml(p) {
+  const sMinsk = p.stockMinsk !== undefined ? Number(p.stockMinsk) : Number(p.inStock || 0);
+  const sMoscow = p.stockMoscow !== undefined ? Number(p.stockMoscow) : 0;
+  if (sMinsk > 0) {
+    return `<span class="badge badge-stock">✓ Минск: ${sMinsk} шт.${sMoscow > 0 ? ` • МСК: ${sMoscow}` : ""}</span>`;
+  }
+  if (sMoscow > 0) {
+    return `<span class="badge" style="background:rgba(37,99,235,0.92); color:#fff;">🚚 Склад Москва: ${sMoscow} шт. (3–5 дн.)</span>`;
+  }
+  return `<span class="badge" style="background:rgba(255,255,255,0.9); color:var(--text-muted);">Под заказ</span>`;
+}
+
 function renderProductCardHTML(p) {
   const isFav = state.favorites.includes(p.id);
   const inCartItem = state.cart.find(c => c.id === p.id);
@@ -391,7 +403,7 @@ function renderProductCardHTML(p) {
         <div class="product-badges">
           ${p.isHit ? `<span class="badge badge-hit">Хит продаж</span>` : ""}
           ${p.oldPrice ? `<span class="badge badge-sale">Выгода ${formatByn(p.oldPrice - p.price)}</span>` : ""}
-          <span class="badge badge-stock">${p.inStock > 0 ? `✓ В наличии (${p.inStock} шт.)` : "Под заказ"}</span>
+          ${getWarehouseBadgeHtml(p)}
         </div>
         <button class="fav-btn ${isFav ? "active" : ""}" onclick="event.stopPropagation(); toggleFavorite('${p.id}')" title="В избранное">
           ${isFav ? "♥" : "♡"}
@@ -1202,9 +1214,11 @@ async function changeAdminPassword() {
 }
 
 function switchAdminTab(tabName) {
-  ["orders", "products", "reels", "settings"].forEach(t => {
-    document.getElementById(`admin-pane-${t}`).style.display = t === tabName ? "block" : "none";
-    document.getElementById(`adm-tab-${t}`).classList.toggle("active", t === tabName);
+  ["orders", "products", "supplier", "reels", "settings"].forEach(t => {
+    const pane = document.getElementById(`admin-pane-${t}`);
+    const btn = document.getElementById(`adm-tab-${t}`);
+    if (pane) pane.style.display = t === tabName ? "block" : "none";
+    if (btn) btn.classList.toggle("active", t === tabName);
   });
   renderAdminDashboard();
 }
@@ -1294,8 +1308,12 @@ function renderAdminDashboard() {
         <div style="display:flex; align-items:center; gap:12px; flex:1; min-width:240px;">
           <img src="${p.image}" alt="" style="width:56px; height:46px; object-fit:cover; border-radius:6px;" onerror="if('${p.fallbackSvg || ""}')this.src='${p.fallbackSvg || ""}'" />
           <div>
-            <div style="font-weight:700; font-size:14px;">${p.title}</div>
-            <div style="font-size:12px; color:var(--text-muted);">Арт: ${p.sku} • Остаток: <strong>${p.inStock} шт.</strong></div>
+            <div style="font-weight:700; font-size:14px;">${escapeHtml(p.title)}</div>
+            <div style="font-size:12px; color:var(--text-muted);">
+              Арт: <strong>${escapeHtml(p.sku)}</strong> •
+              Склад Минск: <strong style="color:var(--success);">${p.stockMinsk ?? p.inStock} шт.</strong> •
+              Склад Москва: <strong style="color:#2563EB;">${p.stockMoscow ?? 0} шт.</strong>
+            </div>
           </div>
         </div>
         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
@@ -1578,6 +1596,130 @@ function exportCatalogJson() {
   document.body.appendChild(dlAnchor);
   dlAnchor.click();
   dlAnchor.remove();
+}
+
+// ==================== АВТО-СИНХРОНИЗАЦИЯ СО СКЛАДОМ ПОСТАВЩИКА (МИНСК / МОСКВА) ====================
+
+function fillDemoSupplierCsv() {
+  const el = document.getElementById("supCsvInput");
+  if (el && typeof DEMO_SUPPLIER_CSV !== "undefined") {
+    el.value = DEMO_SUPPLIER_CSV;
+    showToast("Тестовая выгрузка поставщика (Минск + Москва) подставлена!");
+  }
+}
+
+function handleSupplierFileUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function (e) {
+    document.getElementById("supCsvInput").value = e.target.result;
+    showToast(`Прайс-лист «${file.name}» загружен! Нажмите «Синхронизировать склад сейчас»`);
+  };
+  reader.readAsText(file, "utf-8");
+}
+
+async function runSupplierSync() {
+  const rubRatePer100 = parseFloat(document.getElementById("supRubRate")?.value) || 3.45;
+  const markupPercent = parseFloat(document.getElementById("supMarkup")?.value) || 30;
+  const feedUrl = (document.getElementById("supFeedUrl")?.value || "").trim();
+  const csvText = (document.getElementById("supCsvInput")?.value || "").trim() || (typeof DEMO_SUPPLIER_CSV !== "undefined" ? DEMO_SUPPLIER_CSV : "");
+  const updatePrices = document.getElementById("supUpdatePrices")?.checked !== false;
+  const resultBox = document.getElementById("supplierSyncResultBox");
+
+  if (window.location.protocol !== "file:" && state.adminToken) {
+    try {
+      const res = await fetch("/api/admin/supplier-sync", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-token": state.adminToken
+        },
+        body: JSON.stringify({ csvText, feedUrl, rubRatePer100, markupPercent, updatePrices })
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        state.products = data.products || state.products;
+        saveState();
+        renderCatalog();
+        renderHeroShowcase();
+        renderAdminDashboard();
+        if (resultBox) {
+          resultBox.innerHTML = `
+            <div style="background:var(--success-bg); color:var(--success); padding:14px; border-radius:8px; font-size:13px; border-left:4px solid var(--success);">
+              <strong>✅ Синхронизация со складом Минск / Москва завершена (${escapeHtml(data.syncedAt)}):</strong><br/>
+              • Обновлено существующих артикулов: <strong>${data.updatedCount} шт.</strong><br/>
+              • Автоматически создано новых карточек из прайса: <strong>${data.createdCount} шт.</strong><br/>
+              • Всего товаров в каталоге магазина: <strong>${data.totalProducts} поз.</strong>
+            </div>
+          `;
+        }
+        showToast(`Склад синхронизирован! Обновлено: ${data.updatedCount}, Новых: ${data.createdCount}`);
+        return;
+      } else {
+        showToast(data.error || "Ошибка синхронизации");
+      }
+    } catch (e) {}
+  }
+
+  // Локальный парсер (если открыто без сервера через file://)
+  const lines = csvText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  let updatedCount = 0;
+  let createdCount = 0;
+  for (const line of lines) {
+    if (/^sku[;,\t]/i.test(line) || /^артикул[;,\t]/i.test(line)) continue;
+    const parts = line.includes(";") ? line.split(";") : line.split(",");
+    if (parts.length < 5) continue;
+    const sku = parts[0].trim();
+    const title = parts[1].trim();
+    const rawWholesale = parseFloat(String(parts[2]).replace(",", ".")) || 0;
+    const currency = (parts[3] || "BYN").trim().toUpperCase();
+    const stockMinsk = Math.max(0, parseInt(parts[4], 10) || 0);
+    const stockMoscow = Math.max(0, parseInt(parts[5], 10) || 0);
+    const category = (parts[6] || "faucets-pullout").trim();
+    const material = (parts[7] || "Латунь CW617N").trim();
+    const color = (parts[8] || "Черный матовый").trim();
+
+    const baseByn = currency === "RUB" ? (rawWholesale / 100) * rubRatePer100 : rawWholesale;
+    const retailPriceByn = Math.round(baseByn * (1 + markupPercent / 100));
+
+    const existing = state.products.find(p => p.sku.toLowerCase() === sku.toLowerCase());
+    if (existing) {
+      existing.stockMinsk = stockMinsk;
+      existing.stockMoscow = stockMoscow;
+      existing.inStock = stockMinsk + stockMoscow;
+      if (updatePrices && retailPriceByn > 0) existing.price = retailPriceByn;
+      updatedCount++;
+    } else if (title && retailPriceByn > 0) {
+      const svg = createProductSvg(title.slice(0, 26), "#23272F", "#C59B5F", sku, `${retailPriceByn} BYN`);
+      state.products.unshift({
+        id: "prd-sup-" + Date.now() + "-" + Math.floor(Math.random() * 1000),
+        sku,
+        title,
+        category,
+        categoryLabel: "Поставка со склада",
+        price: retailPriceByn,
+        oldPrice: Math.round(retailPriceByn * 1.15),
+        color,
+        material,
+        spoutType: stockMinsk > 0 ? "В наличии в Минске" : "Склад Москва (3–5 дней)",
+        warranty: "5 лет",
+        stockMinsk,
+        stockMoscow,
+        inStock: stockMinsk + stockMoscow,
+        isHit: true,
+        image: "https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=900&q=80",
+        fallbackSvg: svg,
+        description: `Позиция из прайса поставщика (Арт. ${sku}). Материал: ${material}, цвет: ${color}.`
+      });
+      createdCount++;
+    }
+  }
+
+  saveState();
+  renderCatalog();
+  renderAdminDashboard();
+  showToast(`Склад обновлен! Обновлено: ${updatedCount}, Новых: ${createdCount}`);
 }
 
 // ==================== СТУДИЯ АВТО-ГЕНЕРАЦИИ REELS / TIKTOK ====================

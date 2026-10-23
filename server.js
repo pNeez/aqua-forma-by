@@ -15,7 +15,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { Pool } = require("pg");
-const { DEFAULT_STORE_SETTINGS, DEFAULT_PRODUCTS, DEFAULT_ORDERS } = require("./data.js");
+const { DEFAULT_STORE_SETTINGS, DEFAULT_PRODUCTS, DEFAULT_ORDERS, DEMO_SUPPLIER_CSV, createProductSvg } = require("./data.js");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -631,25 +631,147 @@ app.put("/api/products", requireAdmin, async (req, res) => {
   if (!Array.isArray(req.body.products)) {
     return res.status(400).json({ ok: false, error: "Некорректный список товаров" });
   }
-  const cleanProducts = req.body.products.map(p => ({
-    ...p,
-    id: sanitizeText(p.id, 50),
-    sku: sanitizeText(p.sku, 40),
-    title: sanitizeText(p.title, 180),
-    category: sanitizeText(p.category, 50),
-    categoryLabel: sanitizeText(p.categoryLabel, 80),
-    price: Math.max(0, Number(p.price) || 0),
-    oldPrice: p.oldPrice ? Math.max(0, Number(p.oldPrice)) : null,
-    inStock: Math.max(0, parseInt(p.inStock, 10) || 0),
-    color: sanitizeText(p.color, 80),
-    material: sanitizeText(p.material, 80),
-    spoutType: sanitizeText(p.spoutType, 80),
-    warranty: sanitizeText(p.warranty, 40),
-    description: sanitizeText(p.description, 1000)
-  }));
+  const cleanProducts = req.body.products.map(p => {
+    const sMinsk = Math.max(0, parseInt(p.stockMinsk ?? p.inStock ?? 0, 10) || 0);
+    const sMoscow = Math.max(0, parseInt(p.stockMoscow ?? 0, 10) || 0);
+    return {
+      ...p,
+      id: sanitizeText(p.id, 50),
+      sku: sanitizeText(p.sku, 40),
+      title: sanitizeText(p.title, 180),
+      category: sanitizeText(p.category, 50),
+      categoryLabel: sanitizeText(p.categoryLabel, 80),
+      price: Math.max(0, Number(p.price) || 0),
+      oldPrice: p.oldPrice ? Math.max(0, Number(p.oldPrice)) : null,
+      stockMinsk: sMinsk,
+      stockMoscow: sMoscow,
+      inStock: sMinsk + sMoscow,
+      color: sanitizeText(p.color, 80),
+      material: sanitizeText(p.material, 80),
+      spoutType: sanitizeText(p.spoutType, 80),
+      warranty: sanitizeText(p.warranty, 40),
+      description: sanitizeText(p.description, 1000)
+    };
+  });
 
   await dbSaveProducts(cleanProducts);
   res.json({ ok: true, products: cleanProducts });
+});
+
+// Функция парсинга прайс-листа поставщика (CSV/Excel-таблица с остатками Минск + Москва)
+async function syncSupplierCatalog({ csvText, feedUrl, rubRatePer100 = 3.45, markupPercent = 30, updatePrices = true }) {
+  let rawContent = csvText || "";
+
+  if (!rawContent && feedUrl) {
+    const resp = await fetch(feedUrl);
+    if (!resp.ok) throw new Error(`Не удалось скачать прайс по ссылке (${resp.status})`);
+    rawContent = await resp.text();
+  }
+
+  if (!rawContent.trim()) {
+    rawContent = DEMO_SUPPLIER_CSV;
+  }
+
+  const lines = rawContent
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(Boolean);
+
+  const products = await dbGetProducts();
+  let updatedCount = 0;
+  let createdCount = 0;
+
+  const categoryLabelsMap = {
+    "faucets-filter": "Смесители 3-в-1 (под фильтр)",
+    "faucets-pullout": "С выдвижной лейкой",
+    "faucets-flex": "С гибким изливом",
+    "faucets-classic": "Классические высокие",
+    "drinking-taps": "Краны для питьевой воды",
+    accessories: "Дозаторы и аксессуары"
+  };
+
+  for (const line of lines) {
+    // Пропускаем строку заголовков
+    if (/^sku[;,\t]/i.test(line) || /^артикул[;,\t]/i.test(line)) continue;
+
+    const parts = line.includes(";") ? line.split(";") : line.split(",");
+    if (parts.length < 5) continue;
+
+    const sku = sanitizeText(parts[0], 40);
+    const title = sanitizeText(parts[1], 180);
+    const rawWholesale = parseFloat(String(parts[2]).replace(",", ".")) || 0;
+    const currency = sanitizeText(parts[3] || "BYN", 10).toUpperCase();
+    const stockMinsk = Math.max(0, parseInt(parts[4], 10) || 0);
+    const stockMoscow = Math.max(0, parseInt(parts[5], 10) || 0);
+    const category = sanitizeText(parts[6] || "faucets-pullout", 50);
+    const material = sanitizeText(parts[7] || "Латунь CW617N", 80);
+    const color = sanitizeText(parts[8] || "Черный матовый / Графит", 80);
+
+    if (!sku) continue;
+
+    // Пересчет оптовой цены поставщика (RUB или BYN) в розничную цену в BYN с наценкой дяди
+    const baseByn = currency === "RUB" ? (rawWholesale / 100) * Number(rubRatePer100) : rawWholesale;
+    const retailPriceByn = Math.round(baseByn * (1 + Number(markupPercent) / 100));
+
+    const existing = products.find(p => p.sku.toLowerCase() === sku.toLowerCase());
+    if (existing) {
+      existing.stockMinsk = stockMinsk;
+      existing.stockMoscow = stockMoscow;
+      existing.inStock = stockMinsk + stockMoscow;
+      if (updatePrices && retailPriceByn > 0) {
+        existing.price = retailPriceByn;
+      }
+      if (title) existing.title = title;
+      updatedCount += 1;
+    } else if (title && retailPriceByn > 0) {
+      const generatedSvg = createProductSvg(title.slice(0, 26), "#23272F", "#C59B5F", sku, `${retailPriceByn} BYN`);
+      products.unshift({
+        id: "prd-sup-" + Date.now() + "-" + Math.floor(Math.random() * 1000),
+        sku,
+        title,
+        category: categoryLabelsMap[category] ? category : "faucets-pullout",
+        categoryLabel: categoryLabelsMap[category] || "Смесители и аксессуары",
+        price: retailPriceByn,
+        oldPrice: Math.round(retailPriceByn * 1.15),
+        color,
+        material,
+        spoutType: stockMinsk > 0 ? "В наличии в Минске" : "Поставка со склада Москва",
+        warranty: "5 лет",
+        stockMinsk,
+        stockMoscow,
+        inStock: stockMinsk + stockMoscow,
+        isHit: true,
+        image: "https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=900&q=80",
+        fallbackSvg: generatedSvg,
+        description: `Позиция из прайса поставщика (Арт. ${sku}). Материал корпуса: ${material}, покрытие: ${color}. Доступно на складе в Минске: ${stockMinsk} шт., на центральном складе в Москве: ${stockMoscow} шт.`,
+        features: [
+          `Прямая поставка со склада (Артикул ${sku})`,
+          `Материал: ${material}, цвет: ${color}`,
+          `Склад Минск: ${stockMinsk} шт. / Склад Москва: ${stockMoscow} шт.`
+        ]
+      });
+      createdCount += 1;
+    }
+  }
+
+  await dbSaveProducts(products);
+  return {
+    updatedCount,
+    createdCount,
+    totalProducts: products.length,
+    syncedAt: new Date().toLocaleString("ru-RU"),
+    products
+  };
+}
+
+// 8.1 Маршрут синхронизации прайс-листа и остатков поставщика (Минск / Москва)
+app.post("/api/admin/supplier-sync", requireAdmin, async (req, res) => {
+  try {
+    const result = await syncSupplierCatalog(req.body || {});
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message || "Ошибка синхронизации прайса" });
+  }
 });
 
 // 9. Сохранение настроек магазина (ТОЛЬКО Админ)
