@@ -25,6 +25,16 @@ function normalizePhoneDigits(phone) {
   return String(phone || "").replace(/\D/g, "");
 }
 
+function escapeHtml(str) {
+  if (str === null || str === undefined) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 // Инициализация при загрузке
 document.addEventListener("DOMContentLoaded", async () => {
   loadStateFromStorage();
@@ -577,8 +587,20 @@ function renderCartModalContent() {
   }
 
   const subtotal = state.cart.reduce((sum, item) => sum + item.price * item.qty, 0);
+  const hasFaucet = state.cart.some(i => {
+    const prod = state.products.find(p => p.id === i.id);
+    return prod && prod.category !== "accessories";
+  });
+  const hasAccessory = state.cart.some(i => {
+    const prod = state.products.find(p => p.id === i.id);
+    return prod && prod.category === "accessories";
+  });
+  const isBundle = hasFaucet && hasAccessory;
+  const discountByn = isBundle ? Math.round(subtotal * 0.1 * 100) / 100 : 0;
+  const finalTotal = Math.round((subtotal - discountByn) * 100) / 100;
+
   const freeThreshold = state.settings.freeShippingThresholdByn || 250;
-  const shippingCost = subtotal >= freeThreshold ? 0 : 6.5;
+  const shippingCost = finalTotal >= freeThreshold ? 0 : 6.5;
   const onlinePayEnabled = state.settings.onlinePaymentEnabled;
 
   container.innerHTML = `
@@ -586,6 +608,17 @@ function renderCartModalContent() {
       <h2 style="font-size:20px;">Оформление заказа (${state.cart.reduce((a, b) => a + b.qty, 0)} шт.)</h2>
       <button class="close-btn" onclick="closeCartModal()">✕</button>
     </div>
+
+    ${
+      isBundle
+        ? `<div style="background:var(--success-bg); color:var(--success); padding:10px 14px; border-radius:8px; font-size:13px; font-weight:700; margin-bottom:14px;">
+            🎁 Активирована скидка −10% за комплект «Смеситель + Аксессуар» (Экономия ${formatByn(discountByn)})!
+          </div>`
+        : `<div style="background:var(--brass-light); color:#87632D; padding:10px 14px; border-radius:8px; font-size:12px; font-weight:600; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+            <span>💡 Добавьте к смесителю дозатор или ринзер в цвет — получите скидку −10% на весь заказ!</span>
+            <button class="btn btn-outline btn-sm" style="padding:4px 10px; font-size:11px;" onclick="closeCartModal(); filterByCategory('accessories')">Выбрать аксессуар</button>
+          </div>`
+    }
 
     <div style="margin-bottom:20px; max-height:220px; overflow-y:auto; padding-right:4px;">
       ${state.cart
@@ -595,8 +628,8 @@ function renderCartModalContent() {
           <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:200px;">
             <img src="${item.image}" alt="" style="width:54px; height:46px; object-fit:cover; border-radius:6px;" onerror="if('${item.fallbackSvg}')this.src='${item.fallbackSvg}'" />
             <div>
-              <div style="font-weight:700; font-size:13px;">${item.title}</div>
-              <div style="font-size:11px; color:var(--text-muted);">Арт: ${item.sku} • ${formatByn(item.price)}</div>
+              <div style="font-weight:700; font-size:13px;">${escapeHtml(item.title)}</div>
+              <div style="font-size:11px; color:var(--text-muted);">Арт: ${escapeHtml(item.sku)} • ${formatByn(item.price)}</div>
             </div>
           </div>
           <div style="display:flex; align-items:center; gap:6px;">
@@ -618,28 +651,28 @@ function renderCartModalContent() {
         <h3 style="font-size:15px; margin-bottom:12px;">1. Контакты и доставка по Беларуси</h3>
         <div class="form-group">
           <label class="form-label">Ваше Имя и Фамилия *</label>
-          <input type="text" id="chkName" class="input-field" value="${state.customerProfile.name || ""}" placeholder="Иван Ковалев" />
+          <input type="text" id="chkName" class="input-field" value="${escapeHtml(state.customerProfile.name || "")}" placeholder="Иван Ковалев" />
         </div>
         <div class="form-group">
           <label class="form-label">Телефон (+375) *</label>
-          <input type="tel" id="chkPhone" class="input-field" value="${state.customerProfile.phone || ""}" placeholder="+375 (29) 123-45-67" />
+          <input type="tel" id="chkPhone" class="input-field" value="${escapeHtml(state.customerProfile.phone || "")}" placeholder="+375 (29) 123-45-67" />
         </div>
         <div class="form-group">
           <label class="form-label">Город / Населенный пункт *</label>
-          <input type="text" id="chkCity" class="input-field" value="${state.customerProfile.city || ""}" placeholder="г. Минск, Брест, Гродно..." />
+          <input type="text" id="chkCity" class="input-field" value="${escapeHtml(state.customerProfile.city || "")}" placeholder="г. Минск, Брест, Гродно..." />
         </div>
         <div class="form-group">
           <label class="form-label">Способ получения товара</label>
           <select id="chkDelivery" class="input-field">
             <option value="Европочта (до отделения по РБ)">📦 Европочта — до отделения (${shippingCost === 0 ? "Бесплатно" : "6.50 BYN"})</option>
-            <option value="Самовывоз из магазина (${state.settings.city})">🏪 Самовывоз из павильона — Бесплатно</option>
+            <option value="Самовывоз из магазина (${escapeHtml(state.settings.city)})">🏪 Самовывоз из павильона — Бесплатно</option>
             <option value="Белпочта (до отделения)">📮 Белпочта — по всей Беларуси</option>
             <option value="Курьер до двери">🚚 Курьерская доставка до двери</option>
           </select>
         </div>
         <div class="form-group">
           <label class="form-label">Отделение Европочты или адрес</label>
-          <input type="text" id="chkAddress" class="input-field" value="${state.customerProfile.address || ""}" placeholder="Например: Отделение Европочты №14" />
+          <input type="text" id="chkAddress" class="input-field" value="${escapeHtml(state.customerProfile.address || "")}" placeholder="Например: Отделение Европочты №14" />
         </div>
       </div>
 
@@ -649,7 +682,7 @@ function renderCartModalContent() {
           <label class="form-label">Выберите способ оплаты</label>
           <select id="chkPayment" class="input-field">
             <option value="Оплата при получении (наличными / картой)">💵 При получении (осмотр перед оплатой)</option>
-            <option value="ЕРИП (по номеру заказа после подтверждения)">🏦 Система «Расчет» (ЕРИП) — код ${state.settings.eripServiceCode}</option>
+            <option value="ЕРИП (по номеру заказа после подтверждения)">🏦 Система «Расчет» (ЕРИП) — код ${escapeHtml(state.settings.eripServiceCode)}</option>
             ${
               onlinePayEnabled
                 ? `<option value="Онлайн-оплата картой (bePaid: Белкарт / Visa / MC)">💳 Онлайн-оплата картой на сайте (bePaid)</option>`
@@ -669,6 +702,14 @@ function renderCartModalContent() {
             <span>Стоимость товаров:</span>
             <strong>${formatByn(subtotal)}</strong>
           </div>
+          ${
+            discountByn > 0
+              ? `<div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px; color:var(--success);">
+                  <span>Скидка за комплект (−10%):</span>
+                  <strong>−${formatByn(discountByn)}</strong>
+                </div>`
+              : ""
+          }
           <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:10px;">
             <span>Доставка по РБ:</span>
             <strong style="color:${shippingCost === 0 ? "var(--success)" : "inherit"}">
@@ -677,7 +718,7 @@ function renderCartModalContent() {
           </div>
           <div style="display:flex; justify-content:space-between; font-size:17px; font-weight:800; padding-top:10px; border-top:1px solid var(--border);">
             <span>Итого к оплате:</span>
-            <span style="color:var(--brass-hover);">${formatByn(subtotal)}</span>
+            <span style="color:var(--brass-hover);">${formatByn(finalTotal)}</span>
           </div>
         </div>
 
@@ -703,19 +744,27 @@ async function submitOrder() {
     return;
   }
 
-  const totalByn = state.cart.reduce((sum, item) => sum + item.price * item.qty, 0);
-  const newOrderId = `ORD-2026-${Math.floor(100 + Math.random() * 900)}`;
-  const nowStr = new Date().toLocaleString("ru-RU", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit"
+  const subtotal = state.cart.reduce((sum, item) => sum + item.price * item.qty, 0);
+  const hasFaucet = state.cart.some(i => {
+    const prod = state.products.find(p => p.id === i.id);
+    return prod && prod.category !== "accessories";
   });
+  const hasAccessory = state.cart.some(i => {
+    const prod = state.products.find(p => p.id === i.id);
+    return prod && prod.category === "accessories";
+  });
+  const discountByn = hasFaucet && hasAccessory ? Math.round(subtotal * 0.1 * 100) / 100 : 0;
+  const totalByn = Math.round((subtotal - discountByn) * 100) / 100;
 
-  const newOrder = {
-    id: newOrderId,
-    createdAt: nowStr,
+  let savedOrder = {
+    id: `ORD-2026-${Math.floor(100 + Math.random() * 900)}`,
+    createdAt: new Date().toLocaleString("ru-RU", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
+    }),
     customerName: name,
     customerPhone: phone,
     city: city,
@@ -723,35 +772,36 @@ async function submitOrder() {
     paymentMethod: payment,
     status: "new",
     trackingNumber: "",
-    totalByn: totalByn,
+    subtotalByn: subtotal,
+    discountByn,
+    totalByn,
     comment: comment,
     items: state.cart.map(i => ({ id: i.id, title: i.title, price: i.price, qty: i.qty }))
   };
-
-  // Автоматически авторизуем клиента в его Личном кабинете по номеру телефона заказа
-  state.customerProfile = { name, phone, city, address };
-  state.isCustomerLoggedIn = true;
-  state.orders.unshift(newOrder);
-  state.cart = [];
 
   if (window.location.protocol !== "file:") {
     try {
       const res = await fetch("/api/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newOrder)
+        body: JSON.stringify(savedOrder)
       });
       if (res.ok) {
         const data = await res.json();
+        if (data.order) savedOrder = data.order;
         if (Array.isArray(data.products)) state.products = data.products;
       }
     } catch (e) {
-      sendOrderToTelegram(newOrder);
+      sendOrderToTelegram(savedOrder);
     }
   } else {
-    sendOrderToTelegram(newOrder);
+    sendOrderToTelegram(savedOrder);
   }
 
+  state.customerProfile = { name, phone, city, address };
+  state.isCustomerLoggedIn = true;
+  state.orders.unshift(savedOrder);
+  state.cart = [];
   saveState();
   renderCatalog();
 
@@ -759,25 +809,111 @@ async function submitOrder() {
   container.innerHTML = `
     <div style="text-align:center; padding:28px 12px;">
       <div style="width:60px; height:60px; border-radius:50%; background:var(--success-bg); color:var(--success); font-size:30px; display:flex; align-items:center; justify-content:center; margin:0 auto 14px;">✓</div>
-      <h2 style="margin-bottom:8px;">Заказ №${newOrder.id} сохранен в базе!</h2>
+      <h2 style="margin-bottom:8px;">Заказ №${escapeHtml(savedOrder.id)} сохранен в базе!</h2>
       <p style="color:var(--text-muted); max-width:480px; margin:0 auto 18px; font-size:14px;">
-        Спасибо, <strong>${name}</strong>! Вы можете отслеживать статус сборки и трек-номер Европочты в своем Личном кабинете по номеру <strong>${phone}</strong>.
+        Спасибо, <strong>${escapeHtml(name)}</strong>! Статус сборки и трек-номер Европочты доступны в вашем Личном кабинете.
       </p>
       <div style="background:var(--bg-main); max-width:460px; margin:0 auto 20px; padding:14px; border-radius:10px; text-align:left; font-size:13px;">
-        <div><strong>Сумма заказа:</strong> ${formatByn(newOrder.totalByn)}</div>
-        <div><strong>Доставка:</strong> ${newOrder.deliveryMethod}</div>
-        <div><strong>Способ оплаты:</strong> ${newOrder.paymentMethod}</div>
+        <div><strong>Итоговая сумма:</strong> ${formatByn(savedOrder.totalByn)} ${savedOrder.discountByn > 0 ? `(включая скидку −${formatByn(savedOrder.discountByn)})` : ""}</div>
+        <div><strong>Доставка:</strong> ${escapeHtml(savedOrder.deliveryMethod)}</div>
+        <div><strong>Способ оплаты:</strong> ${escapeHtml(savedOrder.paymentMethod)}</div>
       </div>
       <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
         <button class="btn btn-primary" onclick="closeCartModal(); switchView('account', 'orders')">
           Перейти в Личный кабинет
         </button>
+        <button class="btn btn-dark" onclick="printOrderInvoice('${savedOrder.id}')">
+          📄 Скачать товарный чек / счет ИП
+        </button>
         <button class="btn btn-outline" onclick="closeCartModal()">
-          Продолжить покупки
+          В каталог
         </button>
       </div>
     </div>
   `;
+}
+
+function printOrderInvoice(orderId) {
+  const order = state.orders.find(o => o.id === orderId);
+  if (!order) return;
+  const s = state.settings;
+  const win = window.open("", "_blank", "width=820,height=700");
+  if (!win) {
+    showToast("Разрешите всплывающие окна для печати товарного чека");
+    return;
+  }
+
+  const rowsHtml = order.items
+    .map(
+      (i, idx) => `
+      <tr>
+        <td style="padding:8px; border:1px solid #ccc; text-align:center;">${idx + 1}</td>
+        <td style="padding:8px; border:1px solid #ccc;">${escapeHtml(i.title)}</td>
+        <td style="padding:8px; border:1px solid #ccc; text-align:center;">${i.qty} шт.</td>
+        <td style="padding:8px; border:1px solid #ccc; text-align:right;">${formatByn(i.price)}</td>
+        <td style="padding:8px; border:1px solid #ccc; text-align:right; font-weight:bold;">${formatByn(i.price * i.qty)}</td>
+      </tr>`
+    )
+    .join("");
+
+  win.document.write(`
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+      <meta charset="UTF-8" />
+      <title>Товарный чек / Счет-спецификация №${escapeHtml(order.id)}</title>
+      <style>
+        body { font-family: Arial, sans-serif; padding: 32px; color: #111; line-height: 1.45; }
+        table { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: 13px; }
+        .header-box { display: flex; justify-content: space-between; border-bottom: 2px solid #111; padding-bottom: 14px; margin-bottom: 20px; }
+      </style>
+    </head>
+    <body>
+      <div class="header-box">
+        <div>
+          <h2 style="margin:0 0 4px;">${escapeHtml(s.brandName)}</h2>
+          <div style="font-size:13px;"><strong>Продавец:</strong> ${escapeHtml(s.legalName)}, УНП ${escapeHtml(s.unp)}</div>
+          <div style="font-size:13px;"><strong>Адрес магазина:</strong> ${escapeHtml(s.city)} • Тел: ${escapeHtml(s.phone)}</div>
+        </div>
+        <div style="text-align:right;">
+          <h3 style="margin:0;">ТОВАРНЫЙ ЧЕК / СЧЕТ №${escapeHtml(order.id)}</h3>
+          <div style="font-size:13px;">Дата: ${escapeHtml(order.createdAt)}</div>
+        </div>
+      </div>
+
+      <div style="font-size:13px; margin-bottom:14px;">
+        <div><strong>Покупатель:</strong> ${escapeHtml(order.customerName)} (${escapeHtml(order.customerPhone)})</div>
+        <div><strong>Доставка по РБ:</strong> ${escapeHtml(order.city)}, ${escapeHtml(order.deliveryMethod)}</div>
+        <div><strong>Способ оплаты:</strong> ${escapeHtml(order.paymentMethod)}</div>
+      </div>
+
+      <table>
+        <thead>
+          <tr style="background:#f3f4f6;">
+            <th style="padding:8px; border:1px solid #ccc;">№</th>
+            <th style="padding:8px; border:1px solid #ccc; text-align:left;">Наименование товара (смеситель / аксессуар)</th>
+            <th style="padding:8px; border:1px solid #ccc;">Кол-во</th>
+            <th style="padding:8px; border:1px solid #ccc; text-align:right;">Цена (BYN)</th>
+            <th style="padding:8px; border:1px solid #ccc; text-align:right;">Сумма (BYN)</th>
+          </tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+
+      <div style="text-align:right; font-size:15px; font-weight:bold; margin-bottom:24px;">
+        ${order.discountByn > 0 ? `<div style="color:#1E8E5A; font-size:13px;">Скидка за комплект (10%): −${formatByn(order.discountByn)}</div>` : ""}
+        <div>ИТОГО К ОПЛАТЕ: ${formatByn(order.totalByn)} (Белорусских рублей)</div>
+      </div>
+
+      <div style="font-size:12px; color:#444; border-top:1px solid #ccc; padding-top:12px;">
+        Официальная гарантия на смесители и комплектующие согласно гарантийному талону. Подпись продавца: _______________________
+      </div>
+
+      <script>window.onload = () => window.print();</script>
+    </body>
+    </html>
+  `);
+  win.document.close();
 }
 
 // ==================== ЛИЧНЫЙ КАБИНЕТ ПОКУПАТЕЛЯ (ВХОД ПО ТЕЛЕФОНУ) ====================
@@ -946,6 +1082,9 @@ function renderCustomerAccount() {
                 <span>Итого:</span>
                 <span>${formatByn(o.totalByn)}</span>
               </div>
+              <button class="btn btn-outline btn-sm" style="margin-top:10px; width:100%;" onclick="printOrderInvoice('${o.id}')">
+                📄 Скачать товарный чек / счет ИП
+              </button>
             </div>
           </div>
         </div>
