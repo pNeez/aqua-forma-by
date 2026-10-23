@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AQUAFORMA.BY — Смесители, краны и аксессуары для кухни в Беларуси</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- Верхняя панель (Topbar) -->
+  <div class="topbar">
+    <div class="container topbar-inner">
+      <div class="topbar-left">
+        <span class="topbar-badge">🇧🇾 Доставка по всей Беларуси (Европочта / Белпочта / Курьер)</span>
+        <span id="topAddress">г. Минск, ТЦ «СтройЭкспо», пав. 42</span>
+      </div>
+      <div class="topbar-right">
+        <span id="topWorkHours">Ежедневно с 10:00 до 20:00</span>
+        <a href="tel:+375296458890" id="topPhone">+375 (29) 645-88-90</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Шапка сайта -->
+  <header class="site-header">
+    <div class="container header-inner">
+      <div class="logo" onclick="switchView('catalog')">
+        <div class="logo-mark">AF</div>
+        <div class="logo-text">
+          <span class="logo-title" id="headerBrandName">AQUAFORMA.BY</span>
+          <span class="logo-sub" id="headerBrandSub">Смесители и аксессуары для кухни</span>
+        </div>
+      </div>
+
+      <nav class="nav-links">
+        <button class="nav-btn active" id="nav-catalog" onclick="switchView('catalog')">Каталог товаров</button>
+        <button class="nav-btn" id="nav-delivery" onclick="switchView('delivery')">Доставка и оплата (РБ)</button>
+        <button class="nav-btn" id="nav-account" onclick="switchView('account')">
+          👤 Личный кабинет <span class="badge-count" id="accountOrdersBadge">2</span>
+        </button>
+      </nav>
+
+      <div class="header-actions">
+        <button class="action-btn" onclick="switchView('account', 'favorites')" title="Избранные товары">
+          ♥ Избранное <span class="badge-count" id="favCountBadge">0</span>
+        </button>
+        <button class="action-btn cart-btn" onclick="openCartModal()">
+          🛒 Корзина <span class="badge-count" id="cartCountBadge">0</span>
+        </button>
+        <button class="action-btn admin-switch" id="nav-admin" onclick="switchView('admin')">
+          ⚙️ Админ-панель
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- ==================== СТРАНИЦА 1: КАТАЛОГ И ВИТРИНА ==================== -->
+    <section class="view-section active" id="view-catalog">
+      <!-- Hero-баннер -->
+      <div class="hero">
+        <div>
+          <div class="hero-tag">✦ Проверенная сантехника из латуни и стали SUS304</div>
+          <h1>Кухонные смесители и аксессуары <span>с доставкой по Беларуси</span></h1>
+          <p>
+            Смесители 3-в-1 под фильтр питьевой воды, модели с выдвижной лейкой и режимом «Водопад», встраиваемые дозаторы и коландеры в едином цвете. Официальная гарантия до 5 лет.
+          </p>
+          <div class="hero-cta-group">
+            <button class="btn btn-primary" onclick="document.getElementById('catalogAnchor').scrollIntoView({behavior:'smooth'})">
+              Смотреть каталог
+            </button>
+            <button class="btn btn-outline-light" onclick="filterByCategory('faucets-filter')">
+              Смесители 3-в-1 под фильтр
+            </button>
+            <button class="btn btn-outline-light" onclick="filterByCategory('accessories')">
+              Дозаторы и аксессуары
+            </button>
+          </div>
+          <div class="hero-features">
+            <div>
+              <div class="hero-feat-title">Отправка в день заказа</div>
+              <div class="hero-feat-desc">Европочтой и Белпочтой по РБ</div>
+            </div>
+            <div>
+              <div class="hero-feat-title">Без предоплаты</div>
+              <div class="hero-feat-desc">Осмотр при получении или ЕРИП</div>
+            </div>
+            <div>
+              <div class="hero-feat-title">Гарантия до 5 лет</div>
+              <div class="hero-feat-desc">Запчасти и картриджи в наличии</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="hero-showcase" id="heroShowcaseCard">
+          <!-- Заполняется динамически флагманским товаром -->
+        </div>
+      </div>
+
+      <div id="catalogAnchor"></div>
+
+      <!-- Быстрые категории -->
+      <div class="category-bar" id="categoryPills">
+        <button class="cat-pill active" data-cat="all" onclick="filterByCategory('all')">Все товары</button>
+        <button class="cat-pill" data-cat="faucets-filter" onclick="filterByCategory('faucets-filter')">Смесители 3-в-1 (под фильтр)</button>
+        <button class="cat-pill" data-cat="faucets-pullout" onclick="filterByCategory('faucets-pullout')">С выдвижной лейкой</button>
+        <button class="cat-pill" data-cat="faucets-flex" onclick="filterByCategory('faucets-flex')">С гибким изливом</button>
+        <button class="cat-pill" data-cat="faucets-classic" onclick="filterByCategory('faucets-classic')">Классические высокие</button>
+        <button class="cat-pill" data-cat="drinking-taps" onclick="filterByCategory('drinking-taps')">Краны питьевой воды</button>
+        <button class="cat-pill" data-cat="accessories" onclick="filterByCategory('accessories')">Дозаторы и аксессуары</button>
+      </div>
+
+      <!-- Основная сетка каталога с фильтрами -->
+      <div class="catalog-layout">
+        <aside class="filters-panel">
+          <div class="filter-group">
+            <div class="filter-title">Цена (BYN)</div>
+            <div class="price-inputs">
+              <input type="number" id="filterPriceMin" class="input-field" placeholder="От 0" oninput="renderCatalog()" />
+              <input type="number" id="filterPriceMax" class="input-field" placeholder="До 600" oninput="renderCatalog()" />
+            </div>
+          </div>
+
+          <div class="filter-group">
+            <div class="filter-title">Материал корпуса</div>
+            <label class="filter-option">
+              <input type="checkbox" value="Латунь" class="filter-mat" onchange="renderCatalog()" /> Латунь (тяжелый корпус)
+            </label>
+            <label class="filter-option">
+              <input type="checkbox" value="Нержавеющая" class="filter-mat" onchange="renderCatalog()" /> Нержавеющая сталь SUS304
+            </label>
+          </div>
+
+          <div class="filter-group">
+            <div class="filter-title">Цвет / Покрытие</div>
+            <label class="filter-option">
+              <input type="checkbox" value="Черный" class="filter-color" onchange="renderCatalog()" /> Черный матовый / Графит
+            </label>
+            <label class="filter-option">
+              <input type="checkbox" value="Оружейный" class="filter-color" onchange="renderCatalog()" /> Оружейная сталь (Gunmetal)
+            </label>
+            <label class="filter-option">
+              <input type="checkbox" value="Латунь" class="filter-color" onchange="renderCatalog()" /> Золото / Латунь
+            </label>
+            <label class="filter-option">
+              <input type="checkbox" value="Сатин" class="filter-color" onchange="renderCatalog()" /> Сатин / Хром
+            </label>
+          </div>
+
+          <div class="filter-group">
+            <div class="filter-title">Спецпредложения</div>
+            <label class="filter-option">
+              <input type="checkbox" id="filterOnlyHits" onchange="renderCatalog()" /> Только Хиты продаж
+            </label>
+            <label class="filter-option">
+              <input type="checkbox" id="filterOnlySale" onchange="renderCatalog()" /> Со скидкой
+            </label>
+            <label class="filter-option">
+              <input type="checkbox" id="filterInStock" checked onchange="renderCatalog()" /> В наличии в магазине
+            </label>
+          </div>
+
+          <button class="btn btn-outline" style="width:100%" onclick="resetFilters()">Сбросить фильтры</button>
+        </aside>
+
+        <div>
+          <div class="catalog-toolbar">
+            <div class="search-box">
+              <input
+                type="text"
+                id="searchInput"
+                class="input-field"
+                placeholder="🔍 Поиск по названию, артикулу или характеристике (например: водопад, латунь, дозатор)..."
+                oninput="renderCatalog()"
+              />
+            </div>
+            <div style="display:flex; align-items:center; gap:12px;">
+              <span id="foundCountLabel" style="font-size:13px; color:var(--text-muted); font-weight:600;">Найдено: 8</span>
+              <select id="sortSelect" class="input-field" style="width:auto;" onchange="renderCatalog()">
+                <option value="popular">Сначала популярные (Хиты)</option>
+                <option value="price-asc">Сначала дешевле (BYN)</option>
+                <option value="price-desc">Сначала дороже (BYN)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="products-grid" id="productsGrid">
+            <!-- Карточки товаров рендерятся из app.js -->
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== СТРАНИЦА 2: ДОСТАВКА И ОПЛАТА В РБ ==================== -->
+    <section class="view-section" id="view-delivery">
+      <div class="card-box">
+        <h2 style="font-size:26px; margin-bottom:8px;">Доставка и оплата по Республике Беларусь</h2>
+        <p style="color:var(--text-muted); margin-bottom:24px;">
+          Мы тщательно проверяем каждый смеситель перед отправкой: комплектацию, целостность покрытия и ход картриджа.
+        </p>
+
+        <div class="grid-3">
+          <div class="card-box" style="margin-bottom:0; background:var(--bg-main);">
+            <h3 style="margin-bottom:10px;">📦 Европочта (по всей РБ)</h3>
+            <p style="font-size:14px; color:var(--text-muted); margin-bottom:12px;">
+              Самый быстрый и выгодный способ. Доставка в любое отделение Европочты в Минске, Бресте, Гродно, Гомеле, Витебске, Могилеве и райцентрах за 1–3 дня.
+            </p>
+            <div style="font-weight:700; color:var(--brass-hover);">Стоимость: 6.50 BYN (Бесплатно от <span class="freeShipVal">250</span> BYN)</div>
+          </div>
+
+          <div class="card-box" style="margin-bottom:0; background:var(--bg-main);">
+            <h3 style="margin-bottom:10px;">🏪 Самовывоз из магазина</h3>
+            <p style="font-size:14px; color:var(--text-muted); margin-bottom:12px;">
+              Приезжайте в наш павильон: можно подержать любой смеситель в руках, сравнить цвета с вашей мойкой и подобрать дозатор в тон.
+            </p>
+            <div style="font-weight:700; color:var(--success);">Бесплатно — бронь товара на 3 дня</div>
+          </div>
+
+          <div class="card-box" style="margin-bottom:0; background:var(--bg-main);">
+            <h3 style="margin-bottom:10px;">💳 Способы оплаты</h3>
+            <p style="font-size:14px; color:var(--text-muted); margin-bottom:12px;">
+              Оплата наличными или банковской картой при получении, наложенным платежом на Европочте/Белпочте, либо через систему «Расчет» (ЕРИП).
+            </p>
+            <div style="font-weight:700;">Официальный чек и гарантийный талон</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== СТРАНИЦА 3: ЛИЧНЫЙ КАБИНЕТ ПОКУПАТЕЛЯ ==================== -->
+    <section class="view-section" id="view-account">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+        <div>
+          <h2 style="font-size:26px;">Личный кабинет покупателя</h2>
+          <p style="color:var(--text-muted); font-size:14px;">Ваши сохраненные контакты для быстрого заказа в 1 клик, история заказов со статусами и избранное</p>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-dark btn-sm" onclick="switchAccountSubtab('orders')">📦 Мои заказы</button>
+          <button class="btn btn-outline btn-sm" onclick="switchAccountSubtab('favorites')">♥ Избранные товары</button>
+          <button class="btn btn-outline btn-sm" onclick="switchAccountSubtab('profile')">👤 Мои данные доставки</button>
+        </div>
+      </div>
+
+      <!-- Подвкладка: Заказы покупателя -->
+      <div id="account-sub-orders">
+        <div id="customerOrdersList"></div>
+      </div>
+
+      <!-- Подвкладка: Избранное -->
+      <div id="account-sub-favorites" style="display:none;">
+        <div class="card-box">
+          <h3 style="margin-bottom:16px;">Избранные товары</h3>
+          <div class="products-grid" id="favoritesGrid"></div>
+        </div>
+      </div>
+
+      <!-- Подвкладка: Профиль покупателя -->
+      <div id="account-sub-profile" style="display:none;">
+        <div class="card-box" style="max-width:640px;">
+          <h3 style="margin-bottom:16px;">Данные для автоматического заполнения в корзине</h3>
+          <div class="form-group">
+            <label class="form-label">Ваше Имя и Фамилия</label>
+            <input type="text" id="profName" class="input-field" placeholder="Например: Иван Петров" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Телефон (Беларусь)</label>
+            <input type="text" id="profPhone" class="input-field" placeholder="+375 (29) 000-00-00" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Город / Населенный пункт РБ</label>
+            <input type="text" id="profCity" class="input-field" placeholder="Например: г. Минск / г. Брест" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Предпочтительное отделение Европочты или адрес</label>
+            <input type="text" id="profAddress" class="input-field" placeholder="Отделение Европочты №24 или домашний адрес" />
+          </div>
+          <button class="btn btn-primary" onclick="saveCustomerProfile()">Сохранить данные профиля</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== СТРАНИЦА 4: АДМИН-ПАНЕЛЬ ДЯДИ ==================== -->
+    <section class="view-section" id="view-admin">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; flex-wrap:wrap; gap:12px;">
+        <div>
+          <span class="badge badge-hit" style="margin-bottom:6px; display:inline-block;">КАБИНЕТ ВЛАДЕЛЬЦА МАГАЗИНА</span>
+          <h2 style="font-size:26px;">Управление магазином и генератор Reels/TikTok</h2>
+        </div>
+        <button class="btn btn-primary" onclick="openProductEditor()">+ Добавить новый товар</button>
+      </div>
+
+      <!-- Вкладки админки -->
+      <div class="admin-tabs">
+        <button class="admin-tab-btn active" id="adm-tab-orders" onclick="switchAdminTab('orders')">📋 Заказы покупателей</button>
+        <button class="admin-tab-btn" id="adm-tab-products" onclick="switchAdminTab('products')">🚰 Товары и остатки</button>
+        <button class="admin-tab-btn" id="adm-tab-reels" onclick="switchAdminTab('reels')">🎬 Авто-генератор Reels / TikTok</button>
+        <button class="admin-tab-btn" id="adm-tab-settings" onclick="switchAdminTab('settings')">⚙️ Настройки ИП, Оплаты РБ и Telegram</button>
+      </div>
+
+      <!-- АДМИН ВКЛАДКА 1: ЗАКАЗЫ -->
+      <div id="admin-pane-orders">
+        <div class="grid-3" id="adminKpiCards" style="margin-bottom:24px;"></div>
+        <div class="card-box">
+          <h3 style="margin-bottom:16px;">Список заказов (можно менять статус и вписывать трек-номер Европочты)</h3>
+          <div id="adminOrdersTable"></div>
+        </div>
+      </div>
+
+      <!-- АДМИН ВКЛАДКА 2: УПРАВЛЕНИЕ ТОВАРАМИ -->
+      <div id="admin-pane-products" style="display:none;">
+        <div class="card-box">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:12px;">
+            <h3>Каталог товаров (<span id="adminProductsCount">0</span> поз.)</h3>
+            <div style="display:flex; gap:10px;">
+              <button class="btn btn-outline btn-sm" onclick="exportCatalogJson()">⬇ Скачать базу товаров (JSON)</button>
+              <button class="btn btn-primary btn-sm" onclick="openProductEditor()">+ Добавить смеситель / аксессуар</button>
+            </div>
+          </div>
+          <div id="adminProductsList"></div>
+        </div>
+      </div>
+
+      <!-- АДМИН ВКЛАДКА 3: СТУДИЯ REELS / TIKTOK -->
+      <div id="admin-pane-reels" style="display:none;">
+        <div class="grid-2">
+          <div class="card-box">
+            <h3 style="margin-bottom:8px;">🎬 Автоматический конструктор сценариев и титров Reels / TikTok</h3>
+            <p style="font-size:13px; color:var(--text-muted); margin-bottom:18px;">
+              Выберите товар из ассортимента и формат ролика. Система сформирует готовый посекундный план съемки на телефон (15 сек), цепляющий текст для озвучки/ИИ-голоса, динамические субтитры с ценой в BYN и описание с хэштегами для Беларуси.
+            </p>
+
+            <div class="form-group">
+              <label class="form-label">1. Выберите товар из каталога дяди</label>
+              <select id="reelsProductSelect" class="input-field" onchange="generateReelsContent()"></select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">2. Выберите сценарий (триггер просмотров)</label>
+              <select id="reelsTemplateSelect" class="input-field" onchange="generateReelsContent()">
+                <option value="asmr">Функциональный Вау-обзор / ASMR (напор, режимы струи, детали)</option>
+                <option value="compare">Честное сравнение: «Дешевый силумин vs Наш тяжелый смеситель»</option>
+                <option value="problem">Решение проблемы на кухне (нет места для второго крана / брызги)</option>
+                <option value="bundle">Идеальный комплект в цвет мойки (Смеситель + Дозатор + Коландер)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">3. Акцент в конце видео (Призыв к действию)</label>
+              <select id="reelsCtaSelect" class="input-field" onchange="generateReelsContent()">
+                <option value="europost">Отправка Европочтой по всей Беларуси без предоплаты — ссылка в профиле</option>
+                <option value="plus">Напишите «+» в комментарии — пришлем видеообзор и цену в Директ</option>
+                <option value="visit">Ждем в нашем магазине или заказывайте на сайте с гарантией 5 лет</option>
+              </select>
+            </div>
+
+            <div id="reelsGeneratedOutput" style="margin-top:20px;"></div>
+          </div>
+
+          <div class="card-box" style="display:flex; flex-direction:column; align-items:center;">
+            <h3 style="margin-bottom:12px;">Превью вертикального ролика (9:16)</h3>
+            <div class="phone-preview" id="phonePreviewBox">
+              <!-- Рендерится динамически -->
+            </div>
+            <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap; justify-content:center;">
+              <button class="btn btn-dark btn-sm" onclick="copyReelsScript()">📋 Скопировать сценарий и описание</button>
+              <button class="btn btn-outline btn-sm" onclick="speakReelsVoiceover()">🔊 Прослушать озвучку прямо сейчас</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- АДМИН ВКЛАДКА 4: НАСТРОЙКИ МАГАЗИНА И РБ -->
+      <div id="admin-pane-settings" style="display:none;">
+        <div class="grid-2">
+          <div class="card-box">
+            <h3 style="margin-bottom:14px;">🇧🇾 Реквизиты ИП и контакты магазина (для шапки и подвала РБ)</h3>
+            <div class="form-group">
+              <label class="form-label">Название магазина / Бренда</label>
+              <input type="text" id="setBrandName" class="input-field" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Основной телефон</label>
+              <input type="text" id="setPhone" class="input-field" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Адрес магазина (для самовывоза)</label>
+              <input type="text" id="setCity" class="input-field" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Время работы</label>
+              <input type="text" id="setWorkHours" class="input-field" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Наименование ИП / Юрлица</label>
+              <input type="text" id="setLegalName" class="input-field" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">УНП</label>
+              <input type="text" id="setUnp" class="input-field" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Сведения о регистрации</label>
+              <input type="text" id="setRegAuthority" class="input-field" />
+            </div>
+            <button class="btn btn-primary" onclick="saveStoreSettings()">Сохранить настройки магазина</button>
+          </div>
+
+          <div>
+            <div class="card-box">
+              <h3 style="margin-bottom:10px;">💳 Режим оформления заказа и онлайн-оплаты (bePaid / ЕРИП)</h3>
+              <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">
+                Для ИП в РБ рекомендуется режим заказа с оплатой при получении или выставлением счета в ЕРИП после звонка. Когда будете готовы подключить интернет-эквайринг bePaid — просто включите тумблер ниже.
+              </p>
+              <label class="filter-option" style="font-weight:700; padding:12px; background:var(--bg-main); border-radius:8px; margin-bottom:14px;">
+                <input type="checkbox" id="setOnlinePaymentEnabled" />
+                Включить модуль прямой онлайн-оплаты на сайте (Карты РБ / Белкарт / ЕРИП QR)
+              </label>
+              <div class="form-group">
+                <label class="form-label">ID магазина в системе bePaid (Shop ID)</label>
+                <input type="text" id="setBepaidShopId" class="input-field" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Код услуги в дереве ЕРИП</label>
+                <input type="text" id="setEripCode" class="input-field" />
+              </div>
+              <button class="btn btn-dark btn-sm" onclick="saveStoreSettings()">Сохранить платежные настройки</button>
+            </div>
+
+            <div class="card-box">
+              <h3 style="margin-bottom:10px;">📲 Уведомления о заказах в Telegram дяде</h3>
+              <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">
+                Укажите токен бота (от @BotFather) и ваш Chat ID — каждый новый заказ с сайта будет мгновенно приходить сообщением в Telegram со списком товаров и телефоном клиента.
+              </p>
+              <div class="form-group">
+                <label class="form-label">Telegram Bot Token</label>
+                <input type="text" id="setTgToken" class="input-field" placeholder="123456789:AAH..." />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Telegram Chat ID получателя</label>
+                <input type="text" id="setTgChatId" class="input-field" placeholder="Например: 492819201" />
+              </div>
+              <div style="display:flex; gap:10px;">
+                <button class="btn btn-primary btn-sm" onclick="saveStoreSettings()">Сохранить Telegram</button>
+                <button class="btn btn-outline btn-sm" onclick="testTelegramNotification()">Отправить тест</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ==================== МОДАЛЬНОЕ ОКНО: ДЕТАЛЬНАЯ КАРТОЧКА ТОВАРА ==================== -->
+  <div class="modal-backdrop" id="productModalBackdrop" onclick="if(event.target===this) closeProductModal()">
+    <div class="modal-card" id="productModalContent"></div>
+  </div>
+
+  <!-- ==================== МОДАЛЬНОЕ ОКНО: КОРЗИНА И ОФОРМЛЕНИЕ ЗАКАЗА ==================== -->
+  <div class="modal-backdrop" id="cartModalBackdrop" onclick="if(event.target===this) closeCartModal()">
+    <div class="modal-card" id="cartModalContent"></div>
+  </div>
+
+  <!-- ==================== МОДАЛЬНОЕ ОКНО: ДОБАВЛЕНИЕ / РЕДАКТИРОВАНИЕ ТОВАРА ==================== -->
+  <div class="modal-backdrop" id="editorModalBackdrop" onclick="if(event.target===this) closeProductEditor()">
+    <div class="modal-card" id="editorModalContent" style="max-width:680px;"></div>
+  </div>
+
+  <!-- Подвал сайта с обязательной информацией по законодательству РБ -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div>
+          <div class="footer-title" id="footerBrandName">AQUAFORMA.BY</div>
+          <p style="margin-bottom:12px;">
+            Специализированный магазин кухонных смесителей, кранов для питьевой воды, дозаторов и аксессуаров для кухни.
+          </p>
+          <div style="color:#fff; font-weight:600;" id="footerPhone">+375 (29) 645-88-90</div>
+          <div id="footerAddress">г. Минск, ТЦ «СтройЭкспо», пав. 42</div>
+        </div>
+
+        <div>
+          <div class="footer-title">Каталог</div>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <a href="#catalogAnchor" onclick="filterByCategory('faucets-filter')" style="color:#9CA3AF; text-decoration:none;">Смесители 3-в-1 под фильтр</a>
+            <a href="#catalogAnchor" onclick="filterByCategory('faucets-pullout')" style="color:#9CA3AF; text-decoration:none;">С выдвижной лейкой</a>
+            <a href="#catalogAnchor" onclick="filterByCategory('faucets-flex')" style="color:#9CA3AF; text-decoration:none;">С гибким изливом</a>
+            <a href="#catalogAnchor" onclick="filterByCategory('accessories')" style="color:#9CA3AF; text-decoration:none;">Встраиваемые дозаторы</a>
+          </div>
+        </div>
+
+        <div>
+          <div class="footer-title">Покупателям в РБ</div>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <a href="javascript:void(0)" onclick="switchView('delivery')" style="color:#9CA3AF; text-decoration:none;">Доставка Европочтой и Белпочтой</a>
+            <a href="javascript:void(0)" onclick="switchView('delivery')" style="color:#9CA3AF; text-decoration:none;">Оплата при получении и ЕРИП</a>
+            <a href="javascript:void(0)" onclick="switchView('account')" style="color:#9CA3AF; text-decoration:none;">Личный кабинет и статус заказа</a>
+          </div>
+        </div>
+
+        <div>
+          <div class="footer-title">Гарантия и возврат</div>
+          <p>
+            На все смесители предоставляется официальная гарантия от 2 до 5 лет. Обмен и возврат товара надлежащего качества в течение 14 дней согласно Закону РБ «О защите прав потребителей».
+          </p>
+        </div>
+      </div>
+
+      <div class="legal-notice-rb" id="footerLegalBlock">
+        <!-- Заполняется из настроек ИП -->
+      </div>
+    </div>
+  </footer>
+
+  <!-- Контейнер всплывающих уведомлений -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
