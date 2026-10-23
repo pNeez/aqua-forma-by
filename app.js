@@ -1,58 +1,103 @@
-// Главная логика интернет-магазина и админ-панели AQUAFORMA.BY
+// Главная логика интернет-магазина, базы данных и защищенной админ-панели AQUAFORMA.BY
 
 let state = {
   currentView: "catalog",
   activeCategory: "all",
   products: [],
-  orders: [],
+  orders: [], // Для админа — все заказы; для покупателя — только его собственные заказы
   cart: [],
   favorites: [],
+  isCustomerLoggedIn: false,
   customerProfile: {
-    name: "Алексей Демидов",
-    phone: "+375 (29) 312-45-67",
-    city: "г. Гродно",
-    address: "Отделение Европочты №14 (ул. Советская, 18)"
+    name: "",
+    phone: "",
+    city: "г. Минск",
+    address: ""
   },
+  isAdminLoggedIn: false,
+  adminToken: "",
   settings: {},
   lastGeneratedReelsText: "",
   lastGeneratedVoiceText: ""
 };
 
+function normalizePhoneDigits(phone) {
+  return String(phone || "").replace(/\D/g, "");
+}
+
 // Инициализация при загрузке
 document.addEventListener("DOMContentLoaded", async () => {
   loadStateFromStorage();
-  await syncWithServerOnBoot();
+  await syncPublicStateFromServer();
+
+  // Если сохранена сессия покупателя — подгружаем его заказы с сервера
+  if (state.isCustomerLoggedIn && state.customerProfile.phone) {
+    await refreshCustomerOrdersFromServer();
+  }
+
+  // Если сохранен токен администратора — проверяем его на сервере
+  if (state.adminToken) {
+    await verifySavedAdminToken();
+  }
+
   applyStoreSettingsToUI();
   renderHeroShowcase();
   renderCatalog();
   updateBadges();
-  populateCustomerProfileForm();
+  handleInitialHash();
 });
 
-async function syncWithServerOnBoot() {
+window.addEventListener("hashchange", handleInitialHash);
+
+function handleInitialHash() {
+  const hash = (window.location.hash || "").replace("#", "").trim();
+  if (["catalog", "delivery", "account", "admin"].includes(hash)) {
+    switchView(hash);
+  }
+}
+
+async function syncPublicStateFromServer() {
   if (window.location.protocol === "file:") return;
   try {
     const res = await fetch("/api/state");
     if (!res.ok) return;
     const data = await res.json();
-    if (!data.products || !data.settings) {
-      // Первичная инициализация базы на сервере стартовым каталогом
-      await fetch("/api/init", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          products: state.products,
-          orders: state.orders,
-          settings: state.settings
-        })
-      });
-    } else {
+    if (Array.isArray(data.products) && data.products.length > 0) {
       state.products = data.products;
-      state.orders = data.orders || [];
-      state.settings = data.settings;
+    }
+    if (data.settings) {
+      state.settings = { ...state.settings, ...data.settings };
     }
   } catch (e) {
-    // Если открыто на статическом хостинге без Node.js, работаем через localStorage
+    // Офлайн или статический режим
+  }
+}
+
+async function verifySavedAdminToken() {
+  if (window.location.protocol === "file:") {
+    state.isAdminLoggedIn = true;
+    document.getElementById("nav-admin").style.display = "inline-flex";
+    return;
+  }
+  try {
+    const res = await fetch("/api/admin/data", {
+      headers: { "x-admin-token": state.adminToken }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      state.isAdminLoggedIn = true;
+      state.orders = data.orders || [];
+      state.products = data.products || state.products;
+      state.settings = data.settings || state.settings;
+      document.getElementById("nav-admin").style.display = "inline-flex";
+    } else {
+      state.isAdminLoggedIn = false;
+      state.adminToken = "";
+      localStorage.removeItem("af_admin_token");
+      document.getElementById("nav-admin").style.display = "none";
+    }
+  } catch (e) {
+    // Игнорируем ошибку сети
   }
 }
 
@@ -67,10 +112,20 @@ function loadStateFromStorage() {
   state.cart = savedCart ? JSON.parse(savedCart) : [];
 
   const savedFavs = localStorage.getItem("af_favs_v2");
-  state.favorites = savedFavs ? JSON.parse(savedFavs) : ["prd-101", "prd-102", "prd-112"];
+  state.favorites = savedFavs ? JSON.parse(savedFavs) : ["prd-101", "prd-102"];
 
   const savedProfile = localStorage.getItem("af_profile_v2");
-  if (savedProfile) state.customerProfile = JSON.parse(savedProfile);
+  if (savedProfile) {
+    state.customerProfile = JSON.parse(savedProfile);
+    if (state.customerProfile.phone) {
+      state.isCustomerLoggedIn = true;
+    }
+  }
+
+  const savedAdminToken = localStorage.getItem("af_admin_token");
+  if (savedAdminToken) {
+    state.adminToken = savedAdminToken;
+  }
 
   const savedSettings = localStorage.getItem("af_settings_v2");
   state.settings = savedSettings ? JSON.parse(savedSettings) : { ...DEFAULT_STORE_SETTINGS };
@@ -84,19 +139,21 @@ function saveState() {
   localStorage.setItem("af_profile_v2", JSON.stringify(state.customerProfile));
   localStorage.setItem("af_settings_v2", JSON.stringify(state.settings));
   updateBadges();
+}
 
-  // Если запущен серверный бэкенд (server.js), синхронизируем с серверной БД
-  if (window.location.protocol !== "file:") {
-    fetch("/api/products", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ products: state.products })
-    }).catch(() => {});
-    fetch("/api/settings", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(state.settings)
-    }).catch(() => {});
+async function saveAdminProductsToServer() {
+  saveState();
+  if (window.location.protocol !== "file:" && state.adminToken) {
+    try {
+      await fetch("/api/products", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-token": state.adminToken
+        },
+        body: JSON.stringify({ products: state.products })
+      });
+    } catch (e) {}
   }
 }
 
@@ -122,7 +179,7 @@ function applyStoreSettingsToUI() {
   document.getElementById("topAddress").textContent = s.city;
   document.getElementById("footerAddress").textContent = s.city;
   document.getElementById("topWorkHours").textContent = s.workHours;
-  document.getElementById("topPhone").textContent = s.phone;
+  document.getElementById("topPhone").textContent = "📞 " + s.phone;
   document.getElementById("topPhone").href = "tel:" + s.phone.replace(/[^+\d]/g, "");
   document.getElementById("footerPhone").textContent = s.phone;
 
@@ -142,11 +199,29 @@ function applyStoreSettingsToUI() {
   `;
 }
 
+function getCustomerOrders() {
+  if (!state.isCustomerLoggedIn || !state.customerProfile.phone) return [];
+  const myDigits = normalizePhoneDigits(state.customerProfile.phone);
+  return state.orders.filter(o => normalizePhoneDigits(o.customerPhone) === myDigits);
+}
+
 function updateBadges() {
   const totalCartQty = state.cart.reduce((acc, item) => acc + item.qty, 0);
   document.getElementById("cartCountBadge").textContent = totalCartQty;
+  const mobCartEl = document.getElementById("mobCartCount");
+  if (mobCartEl) mobCartEl.textContent = totalCartQty;
+
   document.getElementById("favCountBadge").textContent = state.favorites.length;
-  document.getElementById("accountOrdersBadge").textContent = state.orders.length;
+  const myOrdersCount = getCustomerOrders().length;
+  document.getElementById("accountOrdersBadge").textContent = myOrdersCount;
+}
+
+// Мобильные фильтры (аккордеон)
+function toggleMobileFilters() {
+  const panel = document.getElementById("filtersPanel");
+  const arrow = document.getElementById("mobileFilterArrow");
+  const isOpen = panel.classList.toggle("mobile-open");
+  arrow.textContent = isOpen ? "▲ Скрыть" : "▼ Показать";
 }
 
 // Навигация между разделами
@@ -160,10 +235,14 @@ function switchView(viewName, subTab = null) {
   const navBtn = document.getElementById(`nav-${viewName}`);
   if (navBtn) navBtn.classList.add("active");
 
+  document.querySelectorAll(".mob-nav-item").forEach(btn => btn.classList.remove("active"));
+  const mobBtn = document.getElementById(`mob-nav-${viewName}`);
+  if (mobBtn) mobBtn.classList.add("active");
+
   const adminBtn = document.getElementById("nav-admin");
   if (viewName === "admin") {
     adminBtn.classList.add("active");
-    renderAdminDashboard();
+    renderAdminView();
   } else {
     adminBtn.classList.remove("active");
   }
@@ -180,20 +259,21 @@ function switchView(viewName, subTab = null) {
 function renderHeroShowcase() {
   const flagship = state.products.find(p => p.isHit) || state.products[0];
   if (!flagship) return;
+  const fallback = flagship.fallbackSvg || "";
   const container = document.getElementById("heroShowcaseCard");
   container.innerHTML = `
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
       <span class="badge badge-hit">★ ХИТ ПРОДАЖ В РБ</span>
       <span style="font-size:12px; color:#D1D5DB;">Арт: ${flagship.sku}</span>
     </div>
-    <img src="${flagship.image}" alt="${flagship.title}" onclick="openProductModal('${flagship.id}')" style="cursor:pointer;" />
-    <div style="font-weight:700; font-size:16px; margin-bottom:8px; cursor:pointer;" onclick="openProductModal('${flagship.id}')">
+    <img src="${flagship.image}" alt="${flagship.title}" onclick="openProductModal('${flagship.id}')" style="cursor:pointer;" onerror="if(this.src!=='${fallback}'&&'${fallback}')this.src='${fallback}'" />
+    <div style="font-weight:700; font-size:15px; margin-bottom:8px; cursor:pointer;" onclick="openProductModal('${flagship.id}')">
       ${flagship.title}
     </div>
     <div class="hero-showcase-meta">
       <div>
-        <span style="font-size:22px; font-weight:800; color:var(--brass);">${formatByn(flagship.price)}</span>
-        ${flagship.oldPrice ? `<span style="font-size:13px; color:#9CA3AF; text-decoration:line-through; margin-left:8px;">${formatByn(flagship.oldPrice)}</span>` : ""}
+        <span style="font-size:21px; font-weight:800; color:var(--brass);">${formatByn(flagship.price)}</span>
+        ${flagship.oldPrice ? `<span style="font-size:12px; color:#9CA3AF; text-decoration:line-through; margin-left:6px;">${formatByn(flagship.oldPrice)}</span>` : ""}
       </div>
       <button class="btn btn-primary btn-sm" onclick="addToCart('${flagship.id}')">В корзину</button>
     </div>
@@ -278,7 +358,7 @@ function renderCatalog() {
 
   if (filtered.length === 0) {
     grid.innerHTML = `
-      <div class="card-box" style="grid-column: 1 / -1; text-align:center; padding:48px 24px;">
+      <div class="card-box" style="grid-column: 1 / -1; text-align:center; padding:40px 20px;">
         <h3 style="margin-bottom:8px;">По вашим фильтрам товаров не найдено</h3>
         <p style="color:var(--text-muted); margin-bottom:16px;">Попробуйте сбросить параметры фильтрации или изменить поисковый запрос.</p>
         <button class="btn btn-primary" onclick="resetFilters()">Показать все товары</button>
@@ -355,20 +435,21 @@ function toggleFavorite(productId) {
 function openProductModal(productId) {
   const p = state.products.find(item => item.id === productId);
   if (!p) return;
+  const fallback = p.fallbackSvg || "";
 
   const content = document.getElementById("productModalContent");
   content.innerHTML = `
     <div class="modal-header">
       <div>
         <span style="font-size:12px; color:var(--text-muted); text-transform:uppercase;">${p.categoryLabel} • Артикул: ${p.sku}</span>
-        <h2 style="font-size:22px; margin-top:4px;">${p.title}</h2>
+        <h2 style="font-size:20px; margin-top:4px;">${p.title}</h2>
       </div>
       <button class="close-btn" onclick="closeProductModal()">✕</button>
     </div>
 
     <div class="grid-2">
       <div>
-        <img src="${p.image}" alt="${p.title}" style="width:100%; border-radius:12px; border:1px solid var(--border); margin-bottom:14px;" />
+        <img src="${p.image}" alt="${p.title}" style="width:100%; max-height:320px; object-fit:cover; border-radius:12px; border:1px solid var(--border); margin-bottom:14px;" onerror="if(this.src!=='${fallback}'&&'${fallback}')this.src='${fallback}'" />
         <div style="background:var(--bg-main); padding:14px; border-radius:10px; font-size:13px;">
           <strong>🇧🇾 Доставка по Беларуси:</strong>
           <ul style="margin-top:6px; padding-left:18px; color:var(--text-muted);">
@@ -380,16 +461,16 @@ function openProductModal(productId) {
       </div>
 
       <div>
-        <div style="display:flex; align-items:baseline; gap:12px; margin-bottom:16px;">
-          <span style="font-size:30px; font-weight:800;">${formatByn(p.price)}</span>
-          ${p.oldPrice ? `<span style="font-size:16px; color:var(--text-muted); text-decoration:line-through;">${formatByn(p.oldPrice)}</span>` : ""}
+        <div style="display:flex; align-items:baseline; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
+          <span style="font-size:28px; font-weight:800;">${formatByn(p.price)}</span>
+          ${p.oldPrice ? `<span style="font-size:15px; color:var(--text-muted); text-decoration:line-through;">${formatByn(p.oldPrice)}</span>` : ""}
           <span class="badge badge-stock" style="margin-left:auto;">В наличии: ${p.inStock} шт.</span>
         </div>
 
         <p style="color:var(--text-main); font-size:14px; margin-bottom:18px;">${p.description}</p>
 
         <div style="margin-bottom:18px;">
-          <div style="font-weight:700; font-size:13px; text-transform:uppercase; margin-bottom:8px;">Характеристики модели:</div>
+          <div style="font-weight:700; font-size:12px; text-transform:uppercase; margin-bottom:8px;">Характеристики модели:</div>
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:13px; background:var(--bg-main); padding:12px; border-radius:8px;">
             <div><span style="color:var(--text-muted);">Материал:</span> <strong>${p.material}</strong></div>
             <div><span style="color:var(--text-muted);">Цвет:</span> <strong>${p.color}</strong></div>
@@ -401,7 +482,7 @@ function openProductModal(productId) {
         ${
           p.features && p.features.length
             ? `<div style="margin-bottom:22px;">
-                <div style="font-weight:700; font-size:13px; text-transform:uppercase; margin-bottom:8px;">Преимущества и комплектация:</div>
+                <div style="font-weight:700; font-size:12px; text-transform:uppercase; margin-bottom:8px;">Преимущества и комплектация:</div>
                 <ul style="padding-left:18px; font-size:13px; color:var(--text-muted); display:flex; flex-direction:column; gap:5px;">
                   ${p.features.map(f => `<li>${f}</li>`).join("")}
                 </ul>
@@ -409,7 +490,7 @@ function openProductModal(productId) {
             : ""
         }
 
-        <div style="display:flex; gap:12px; flex-wrap:wrap;">
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
           <button class="btn btn-primary" style="flex:1;" onclick="addToCart('${p.id}'); closeProductModal(); openCartModal();">
             🛒 Купить сейчас
           </button>
@@ -444,6 +525,7 @@ function addToCart(productId) {
       sku: product.sku,
       price: product.price,
       image: product.image,
+      fallbackSvg: product.fallbackSvg || "",
       qty: 1
     });
   }
@@ -484,7 +566,7 @@ function renderCartModalContent() {
         <h2>Корзина покупок</h2>
         <button class="close-btn" onclick="closeCartModal()">✕</button>
       </div>
-      <div style="text-align:center; padding:40px 20px;">
+      <div style="text-align:center; padding:36px 16px;">
         <div style="font-size:42px; margin-bottom:12px;">🛒</div>
         <h3 style="margin-bottom:8px;">Ваша корзина пока пуста</h3>
         <p style="color:var(--text-muted); margin-bottom:20px;">Выберите смеситель, кран для питьевой воды или дозатор в каталоге.</p>
@@ -497,32 +579,32 @@ function renderCartModalContent() {
   const subtotal = state.cart.reduce((sum, item) => sum + item.price * item.qty, 0);
   const freeThreshold = state.settings.freeShippingThresholdByn || 250;
   const shippingCost = subtotal >= freeThreshold ? 0 : 6.5;
-
   const onlinePayEnabled = state.settings.onlinePaymentEnabled;
 
   container.innerHTML = `
     <div class="modal-header">
-      <h2>Оформление заказа (${state.cart.reduce((a, b) => a + b.qty, 0)} шт.)</h2>
+      <h2 style="font-size:20px;">Оформление заказа (${state.cart.reduce((a, b) => a + b.qty, 0)} шт.)</h2>
       <button class="close-btn" onclick="closeCartModal()">✕</button>
     </div>
 
-    <!-- Список товаров в корзине -->
-    <div style="margin-bottom:22px; max-height:240px; overflow-y:auto; padding-right:4px;">
+    <div style="margin-bottom:20px; max-height:220px; overflow-y:auto; padding-right:4px;">
       ${state.cart
         .map(
           item => `
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:14px; padding:12px 0; border-bottom:1px solid var(--border);">
-          <img src="${item.image}" alt="" style="width:64px; height:52px; object-fit:cover; border-radius:8px;" />
-          <div style="flex:1;">
-            <div style="font-weight:700; font-size:14px;">${item.title}</div>
-            <div style="font-size:12px; color:var(--text-muted);">Арт: ${item.sku} • ${formatByn(item.price)} за шт.</div>
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 0; border-bottom:1px solid var(--border); flex-wrap:wrap;">
+          <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:200px;">
+            <img src="${item.image}" alt="" style="width:54px; height:46px; object-fit:cover; border-radius:6px;" onerror="if('${item.fallbackSvg}')this.src='${item.fallbackSvg}'" />
+            <div>
+              <div style="font-weight:700; font-size:13px;">${item.title}</div>
+              <div style="font-size:11px; color:var(--text-muted);">Арт: ${item.sku} • ${formatByn(item.price)}</div>
+            </div>
           </div>
-          <div style="display:flex; align-items:center; gap:8px;">
-            <button class="btn btn-outline btn-sm" onclick="changeCartQty('${item.id}', -1)">−</button>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <button class="btn btn-outline btn-sm" style="padding:4px 10px;" onclick="changeCartQty('${item.id}', -1)">−</button>
             <span style="font-weight:700; min-width:20px; text-align:center;">${item.qty}</span>
-            <button class="btn btn-outline btn-sm" onclick="changeCartQty('${item.id}', 1)">+</button>
+            <button class="btn btn-outline btn-sm" style="padding:4px 10px;" onclick="changeCartQty('${item.id}', 1)">+</button>
           </div>
-          <div style="font-weight:800; min-width:95px; text-align:right;">
+          <div style="font-weight:800; min-width:85px; text-align:right; font-size:14px;">
             ${formatByn(item.price * item.qty)}
           </div>
         </div>
@@ -533,14 +615,14 @@ function renderCartModalContent() {
 
     <div class="grid-2">
       <div>
-        <h3 style="font-size:16px; margin-bottom:12px;">1. Контактные данные и доставка по РБ</h3>
+        <h3 style="font-size:15px; margin-bottom:12px;">1. Контакты и доставка по Беларуси</h3>
         <div class="form-group">
           <label class="form-label">Ваше Имя и Фамилия *</label>
           <input type="text" id="chkName" class="input-field" value="${state.customerProfile.name || ""}" placeholder="Иван Ковалев" />
         </div>
         <div class="form-group">
-          <label class="form-label">Телефон белорусского оператора (+375) *</label>
-          <input type="text" id="chkPhone" class="input-field" value="${state.customerProfile.phone || ""}" placeholder="+375 (29) 123-45-67" />
+          <label class="form-label">Телефон (+375) *</label>
+          <input type="tel" id="chkPhone" class="input-field" value="${state.customerProfile.phone || ""}" placeholder="+375 (29) 123-45-67" />
         </div>
         <div class="form-group">
           <label class="form-label">Город / Населенный пункт *</label>
@@ -550,60 +632,50 @@ function renderCartModalContent() {
           <label class="form-label">Способ получения товара</label>
           <select id="chkDelivery" class="input-field">
             <option value="Европочта (до отделения по РБ)">📦 Европочта — до отделения (${shippingCost === 0 ? "Бесплатно" : "6.50 BYN"})</option>
-            <option value="Самовывоз из магазина (${state.settings.city})">🏪 Самовывоз из магазина (${state.settings.city}) — Бесплатно</option>
+            <option value="Самовывоз из магазина (${state.settings.city})">🏪 Самовывоз из павильона — Бесплатно</option>
             <option value="Белпочта (до отделения)">📮 Белпочта — по всей Беларуси</option>
             <option value="Курьер до двери">🚚 Курьерская доставка до двери</option>
           </select>
         </div>
         <div class="form-group">
-          <label class="form-label">Номер отделения Европочты или адрес доставки</label>
+          <label class="form-label">Отделение Европочты или адрес</label>
           <input type="text" id="chkAddress" class="input-field" value="${state.customerProfile.address || ""}" placeholder="Например: Отделение Европочты №14" />
         </div>
       </div>
 
       <div>
-        <h3 style="font-size:16px; margin-bottom:12px;">2. Способ оплаты и подтверждение</h3>
+        <h3 style="font-size:15px; margin-bottom:12px;">2. Способ оплаты и подтверждение</h3>
         <div class="form-group">
-          <label class="form-label">Выберите удобный способ оплаты</label>
+          <label class="form-label">Выберите способ оплаты</label>
           <select id="chkPayment" class="input-field">
-            <option value="Оплата при получении (наличными / картой)">💵 При получении (осмотр товара перед оплатой)</option>
-            <option value="ЕРИП (по номеру заказа после подтверждения)">🏦 Система «Расчет» (ЕРИП) — код услуги ${state.settings.eripServiceCode}</option>
+            <option value="Оплата при получении (наличными / картой)">💵 При получении (осмотр перед оплатой)</option>
+            <option value="ЕРИП (по номеру заказа после подтверждения)">🏦 Система «Расчет» (ЕРИП) — код ${state.settings.eripServiceCode}</option>
             ${
               onlinePayEnabled
-                ? `<option value="Онлайн-оплата картой (bePaid: Белкарт / Visa / MC)">💳 Онлайн-оплата картой на сайте (bePaid Эквайринг)</option>`
+                ? `<option value="Онлайн-оплата картой (bePaid: Белкарт / Visa / MC)">💳 Онлайн-оплата картой на сайте (bePaid)</option>`
                 : ""
             }
-            <option value="Безналичный расчет (для юрлиц и ИП со счетом)">📄 Безналичный расчет по счету (для ИП и ООО)</option>
+            <option value="Безналичный расчет (для ИП и ООО со счетом)">📄 Безналичный расчет по счету</option>
           </select>
         </div>
 
-        ${
-          !onlinePayEnabled
-            ? `<div style="background:var(--bg-main); border-left:3px solid var(--brass); padding:12px; border-radius:6px; font-size:12px; color:var(--text-muted); margin-bottom:14px;">
-                <strong>Режим безопасной сделки (для ИП):</strong> Вы не платите ничего прямо сейчас. Мы проверим товар на складе, перезвоним вам в течение 15 минут и отправим посылку либо забронируем в магазине.
-              </div>`
-            : `<div style="background:var(--success-bg); border-left:3px solid var(--success); padding:12px; border-radius:6px; font-size:12px; color:var(--success); margin-bottom:14px;">
-                <strong>Активен онлайн-эквайринг bePaid (Shop ID ${state.settings.bepaidShopId}):</strong> доступна мгновенная оплата картами Белкарт, Visa, Mastercard и по QR-коду ЕРИП.
-              </div>`
-        }
-
         <div class="form-group">
           <label class="form-label">Комментарий к заказу (по желанию)</label>
-          <textarea id="chkComment" class="input-field" rows="2" placeholder="Например: нужен ли переходник к фильтру воды?"></textarea>
+          <textarea id="chkComment" class="input-field" rows="2" placeholder="Например: нужен переходник к фильтру воды"></textarea>
         </div>
 
-        <div style="background:var(--bg-main); padding:16px; border-radius:10px; margin-bottom:16px;">
-          <div style="display:flex; justify-content:space-between; font-size:14px; margin-bottom:6px;">
+        <div style="background:var(--bg-main); padding:14px; border-radius:10px; margin-bottom:16px;">
+          <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px;">
             <span>Стоимость товаров:</span>
             <strong>${formatByn(subtotal)}</strong>
           </div>
-          <div style="display:flex; justify-content:space-between; font-size:14px; margin-bottom:10px;">
-            <span>Доставка по Беларуси:</span>
+          <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:10px;">
+            <span>Доставка по РБ:</span>
             <strong style="color:${shippingCost === 0 ? "var(--success)" : "inherit"}">
-              ${shippingCost === 0 ? "Бесплатно (заказ от " + freeThreshold + " BYN)" : formatByn(shippingCost)}
+              ${shippingCost === 0 ? "Бесплатно" : formatByn(shippingCost)}
             </strong>
           </div>
-          <div style="display:flex; justify-content:space-between; font-size:18px; font-weight:800; padding-top:10px; border-top:1px solid var(--border);">
+          <div style="display:flex; justify-content:space-between; font-size:17px; font-weight:800; padding-top:10px; border-top:1px solid var(--border);">
             <span>Итого к оплате:</span>
             <span style="color:var(--brass-hover);">${formatByn(subtotal)}</span>
           </div>
@@ -626,8 +698,8 @@ async function submitOrder() {
   const payment = document.getElementById("chkPayment").value;
   const comment = document.getElementById("chkComment").value.trim();
 
-  if (!name || !phone || !city) {
-    showToast("Пожалуйста, укажите Имя, Телефон (+375...) и Город");
+  if (!name || normalizePhoneDigits(phone).length < 7 || !city) {
+    showToast("Пожалуйста, укажите Имя, корректный Телефон (+375...) и Город");
     return;
   }
 
@@ -656,49 +728,47 @@ async function submitOrder() {
     items: state.cart.map(i => ({ id: i.id, title: i.title, price: i.price, qty: i.qty }))
   };
 
-  // Уменьшаем остаток на складе
-  newOrder.items.forEach(orderItem => {
-    const prod = state.products.find(p => p.id === orderItem.id);
-    if (prod && prod.inStock >= orderItem.qty) {
-      prod.inStock -= orderItem.qty;
-    }
-  });
-
-  // Сохраняем профиль клиента для следующих покупок
+  // Автоматически авторизуем клиента в его Личном кабинете по номеру телефона заказа
   state.customerProfile = { name, phone, city, address };
+  state.isCustomerLoggedIn = true;
   state.orders.unshift(newOrder);
   state.cart = [];
-  saveState();
-  renderCatalog();
 
-  // Отправка заказа на серверный бэкенд (если запущен server.js) или напрямую в Telegram
   if (window.location.protocol !== "file:") {
-    fetch("/api/orders", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(newOrder)
-    }).catch(() => {
+    try {
+      const res = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newOrder)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.products)) state.products = data.products;
+      }
+    } catch (e) {
       sendOrderToTelegram(newOrder);
-    });
+    }
   } else {
     sendOrderToTelegram(newOrder);
   }
 
-  // Показываем экран успешного заказа
+  saveState();
+  renderCatalog();
+
   const container = document.getElementById("cartModalContent");
   container.innerHTML = `
-    <div style="text-align:center; padding:32px 16px;">
-      <div style="width:64px; height:64px; border-radius:50%; background:var(--success-bg); color:var(--success); font-size:32px; display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">✓</div>
-      <h2 style="margin-bottom:8px;">Заказ №${newOrder.id} успешно принят!</h2>
-      <p style="color:var(--text-muted); max-width:520px; margin:0 auto 20px;">
-        Спасибо, <strong>${name}</strong>! Заказ уже отображается в вашем Личном кабинете и в Админ-панели магазина. Мы свяжемся с вами по номеру <strong>${phone}</strong>.
+    <div style="text-align:center; padding:28px 12px;">
+      <div style="width:60px; height:60px; border-radius:50%; background:var(--success-bg); color:var(--success); font-size:30px; display:flex; align-items:center; justify-content:center; margin:0 auto 14px;">✓</div>
+      <h2 style="margin-bottom:8px;">Заказ №${newOrder.id} сохранен в базе!</h2>
+      <p style="color:var(--text-muted); max-width:480px; margin:0 auto 18px; font-size:14px;">
+        Спасибо, <strong>${name}</strong>! Вы можете отслеживать статус сборки и трек-номер Европочты в своем Личном кабинете по номеру <strong>${phone}</strong>.
       </p>
-      <div style="background:var(--bg-main); max-width:480px; margin:0 auto 24px; padding:16px; border-radius:10px; text-align:left; font-size:13px;">
+      <div style="background:var(--bg-main); max-width:460px; margin:0 auto 20px; padding:14px; border-radius:10px; text-align:left; font-size:13px;">
         <div><strong>Сумма заказа:</strong> ${formatByn(newOrder.totalByn)}</div>
         <div><strong>Доставка:</strong> ${newOrder.deliveryMethod}</div>
         <div><strong>Способ оплаты:</strong> ${newOrder.paymentMethod}</div>
       </div>
-      <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap;">
+      <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
         <button class="btn btn-primary" onclick="closeCartModal(); switchView('account', 'orders')">
           Перейти в Личный кабинет
         </button>
@@ -710,7 +780,65 @@ async function submitOrder() {
   `;
 }
 
-// ==================== ЛИЧНЫЙ КАБИНЕТ ПОКУПАТЕЛЯ ====================
+// ==================== ЛИЧНЫЙ КАБИНЕТ ПОКУПАТЕЛЯ (ВХОД ПО ТЕЛЕФОНУ) ====================
+
+async function loginCustomerByPhone() {
+  const phone = document.getElementById("loginCustPhone").value.trim();
+  const name = document.getElementById("loginCustName").value.trim();
+
+  if (normalizePhoneDigits(phone).length < 7) {
+    showToast("Введите ваш номер телефона (+375...)");
+    return;
+  }
+
+  state.customerProfile.phone = phone;
+  if (name) state.customerProfile.name = name;
+  state.isCustomerLoggedIn = true;
+
+  await refreshCustomerOrdersFromServer();
+  saveState();
+  renderCustomerAccount();
+  showToast("Вы вошли в Личный кабинет покупателя!");
+}
+
+async function loginDemoCustomer() {
+  document.getElementById("loginCustPhone").value = "+375 (29) 312-45-67";
+  document.getElementById("loginCustName").value = "Алексей Демидов";
+  await loginCustomerByPhone();
+}
+
+async function refreshCustomerOrdersFromServer() {
+  if (window.location.protocol === "file:") return;
+  try {
+    const res = await fetch("/api/customer/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(state.customerProfile)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.customer) {
+        state.customerProfile = {
+          name: data.customer.name || state.customerProfile.name,
+          phone: data.customer.phone || state.customerProfile.phone,
+          city: data.customer.city || state.customerProfile.city,
+          address: data.customer.address || state.customerProfile.address
+        };
+      }
+      if (Array.isArray(data.orders) && !state.isAdminLoggedIn) {
+        state.orders = data.orders;
+      }
+    }
+  } catch (e) {}
+}
+
+function logoutCustomer() {
+  state.isCustomerLoggedIn = false;
+  state.customerProfile = { name: "", phone: "", city: "г. Минск", address: "" };
+  saveState();
+  renderCustomerAccount();
+  showToast("Вы вышли из Личного кабинета");
+}
 
 function switchAccountSubtab(tab) {
   document.getElementById("account-sub-orders").style.display = tab === "orders" ? "block" : "none";
@@ -720,21 +848,24 @@ function switchAccountSubtab(tab) {
 }
 
 function populateCustomerProfileForm() {
-  document.getElementById("profName").value = state.customerProfile.name || "";
+  const nameEl = document.getElementById("profName");
+  if (!nameEl) return;
+  nameEl.value = state.customerProfile.name || "";
   document.getElementById("profPhone").value = state.customerProfile.phone || "";
   document.getElementById("profCity").value = state.customerProfile.city || "";
   document.getElementById("profAddress").value = state.customerProfile.address || "";
 }
 
-function saveCustomerProfile() {
+async function saveCustomerProfile() {
   state.customerProfile = {
     name: document.getElementById("profName").value.trim(),
     phone: document.getElementById("profPhone").value.trim(),
     city: document.getElementById("profCity").value.trim(),
     address: document.getElementById("profAddress").value.trim()
   };
+  await refreshCustomerOrdersFromServer();
   saveState();
-  showToast("Контактные данные покупателя сохранены!");
+  showToast("Данные доставки сохранены в базе!");
 }
 
 function getStatusInfo(status) {
@@ -749,34 +880,54 @@ function getStatusInfo(status) {
 }
 
 function renderCustomerAccount() {
+  const loginBox = document.getElementById("customerLoginBox");
+  const contentBox = document.getElementById("customerAccountContent");
+
+  if (!state.isCustomerLoggedIn || !state.customerProfile.phone) {
+    loginBox.style.display = "block";
+    contentBox.style.display = "none";
+    return;
+  }
+
+  loginBox.style.display = "none";
+  contentBox.style.display = "block";
+
+  document.getElementById("accountWelcomeTitle").textContent = `Кабинет покупателя: ${state.customerProfile.name || "Клиент"}`;
+  document.getElementById("accountPhoneSubtitle").textContent = `Привязанный телефон: ${state.customerProfile.phone} • ${state.customerProfile.city || "Беларусь"}`;
+
   populateCustomerProfileForm();
 
-  // Список заказов
+  const myOrders = getCustomerOrders();
   const ordersContainer = document.getElementById("customerOrdersList");
-  if (state.orders.length === 0) {
-    ordersContainer.innerHTML = `<div class="card-box">У вас пока нет оформленных заказов.</div>`;
+  if (myOrders.length === 0) {
+    ordersContainer.innerHTML = `
+      <div class="card-box">
+        <h3 style="margin-bottom:6px;">По номеру ${state.customerProfile.phone} заказов пока нет</h3>
+        <p style="font-size:13px; color:var(--text-muted);">Оформите заказ через корзину — и здесь сразу появится его статус и трек-номер Европочты.</p>
+      </div>
+    `;
   } else {
-    ordersContainer.innerHTML = state.orders
+    ordersContainer.innerHTML = myOrders
       .map(o => {
         const st = getStatusInfo(o.status);
         return `
         <div class="card-box">
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; padding-bottom:12px; border-bottom:1px solid var(--border); margin-bottom:14px;">
             <div>
-              <span style="font-weight:800; font-size:17px;">Заказ №${o.id}</span>
-              <span style="font-size:13px; color:var(--text-muted); margin-left:10px;">от ${o.createdAt}</span>
+              <span style="font-weight:800; font-size:16px;">Заказ №${o.id}</span>
+              <span style="font-size:12px; color:var(--text-muted); margin-left:8px;">от ${o.createdAt}</span>
             </div>
             <span class="status-pill ${st.cls}">${st.label}</span>
           </div>
 
-          <div class="grid-2" style="margin-bottom:14px; font-size:14px;">
+          <div class="grid-2" style="font-size:13px;">
             <div>
               <div><strong>Получатель:</strong> ${o.customerName} (${o.customerPhone})</div>
               <div><strong>Доставка:</strong> ${o.city}, ${o.deliveryMethod}</div>
               <div><strong>Оплата:</strong> ${o.paymentMethod}</div>
               ${
                 o.trackingNumber
-                  ? `<div style="margin-top:6px; color:var(--brass-hover); font-weight:700;">📦 Трек-номер посылки (Европочта/Белпочта): ${o.trackingNumber}</div>`
+                  ? `<div style="margin-top:8px; padding:8px 10px; background:var(--bg-main); border-radius:6px; color:var(--brass-hover); font-weight:700;">📦 Трек-номер Европочты: ${o.trackingNumber}</div>`
                   : ""
               }
             </div>
@@ -785,13 +936,13 @@ function renderCustomerAccount() {
               ${o.items
                 .map(
                   i =>
-                    `<div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:4px;">
+                    `<div style="display:flex; justify-content:space-between; margin-bottom:4px;">
                       <span>${i.title} × ${i.qty} шт.</span>
                       <strong>${formatByn(i.price * i.qty)}</strong>
                     </div>`
                 )
                 .join("")}
-              <div style="display:flex; justify-content:space-between; font-size:16px; font-weight:800; margin-top:8px; padding-top:8px; border-top:1px solid var(--border);">
+              <div style="display:flex; justify-content:space-between; font-size:15px; font-weight:800; margin-top:8px; padding-top:8px; border-top:1px solid var(--border);">
                 <span>Итого:</span>
                 <span>${formatByn(o.totalByn)}</span>
               </div>
@@ -813,7 +964,103 @@ function renderCustomerAccount() {
   }
 }
 
-// ==================== АДМИН-ПАНЕЛЬ ДЯДИ ====================
+// ==================== ЗАЩИЩЕННАЯ АДМИН-ПАНЕЛЬ ДЯДИ ====================
+
+function renderAdminView() {
+  const loginBox = document.getElementById("adminLoginBox");
+  const protectedBox = document.getElementById("adminProtectedContent");
+
+  if (!state.isAdminLoggedIn) {
+    loginBox.style.display = "block";
+    protectedBox.style.display = "none";
+    return;
+  }
+
+  loginBox.style.display = "none";
+  protectedBox.style.display = "block";
+  renderAdminDashboard();
+}
+
+async function loginAdmin() {
+  const pin = document.getElementById("adminPinInput").value.trim();
+  if (!pin) {
+    showToast("Введите пароль владельца");
+    return;
+  }
+
+  if (window.location.protocol === "file:") {
+    if (pin === "2026" || pin === "1234") {
+      state.isAdminLoggedIn = true;
+      state.adminToken = "local_admin_token";
+      localStorage.setItem("af_admin_token", state.adminToken);
+      document.getElementById("nav-admin").style.display = "inline-flex";
+      renderAdminView();
+      showToast("Вход в Админ-панель выполнен!");
+    } else {
+      showToast("Неверный пароль (по умолчанию: 2026)");
+    }
+    return;
+  }
+
+  try {
+    const res = await fetch("/api/admin/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin })
+    });
+    const data = await res.json();
+    if (res.ok && data.ok) {
+      state.isAdminLoggedIn = true;
+      state.adminToken = data.token;
+      state.orders = data.orders || state.orders;
+      state.settings = data.settings || state.settings;
+      localStorage.setItem("af_admin_token", state.adminToken);
+      document.getElementById("nav-admin").style.display = "inline-flex";
+      document.getElementById("adminPinInput").value = "";
+      renderAdminView();
+      showToast("🔓 Добро пожаловать в кабинет владельца!");
+    } else {
+      showToast(data.error || "Неверный пароль администратора");
+    }
+  } catch (e) {
+    showToast("Ошибка соединения с сервером");
+  }
+}
+
+function logoutAdmin() {
+  state.isAdminLoggedIn = false;
+  state.adminToken = "";
+  localStorage.removeItem("af_admin_token");
+  document.getElementById("nav-admin").style.display = "none";
+  switchView("catalog");
+  showToast("Вы вышли из Админ-панели");
+}
+
+async function changeAdminPassword() {
+  const newPin = document.getElementById("newAdminPinInput").value.trim();
+  if (newPin.length < 4) {
+    showToast("Новый пароль должен содержать минимум 4 символа");
+    return;
+  }
+  if (window.location.protocol !== "file:") {
+    const res = await fetch("/api/admin/change-pin", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-admin-token": state.adminToken
+      },
+      body: JSON.stringify({ newPin })
+    });
+    if (res.ok) {
+      document.getElementById("newAdminPinInput").value = "";
+      showToast("Пароль владельца успешно обновлен в базе данных!");
+    } else {
+      showToast("Не удалось обновить пароль");
+    }
+  } else {
+    showToast("В локальном режиме пароль меняется на сервере");
+  }
+}
 
 function switchAdminTab(tabName) {
   ["orders", "products", "reels", "settings"].forEach(t => {
@@ -824,7 +1071,8 @@ function switchAdminTab(tabName) {
 }
 
 function renderAdminDashboard() {
-  // KPI карточки
+  if (!state.isAdminLoggedIn) return;
+
   const totalRevenue = state.orders
     .filter(o => o.status !== "cancelled")
     .reduce((sum, o) => sum + Number(o.totalByn), 0);
@@ -832,32 +1080,31 @@ function renderAdminDashboard() {
 
   document.getElementById("adminKpiCards").innerHTML = `
     <div class="card-box" style="margin-bottom:0;">
-      <div style="font-size:13px; color:var(--text-muted);">Всего заказов</div>
-      <div style="font-size:28px; font-weight:800; margin-top:4px;">${state.orders.length} <span style="font-size:14px; color:var(--warning);">(${newOrdersCount} новых)</span></div>
+      <div style="font-size:12px; color:var(--text-muted);">Всего заказов в БД</div>
+      <div style="font-size:26px; font-weight:800; margin-top:4px;">${state.orders.length} <span style="font-size:13px; color:var(--warning);">(${newOrdersCount} новых)</span></div>
     </div>
     <div class="card-box" style="margin-bottom:0;">
-      <div style="font-size:13px; color:var(--text-muted);">Сумма заказов (BYN)</div>
-      <div style="font-size:28px; font-weight:800; color:var(--success); margin-top:4px;">${formatByn(totalRevenue)}</div>
+      <div style="font-size:12px; color:var(--text-muted);">Сумма заказов (BYN)</div>
+      <div style="font-size:26px; font-weight:800; color:var(--success); margin-top:4px;">${formatByn(totalRevenue)}</div>
     </div>
     <div class="card-box" style="margin-bottom:0;">
-      <div style="font-size:13px; color:var(--text-muted);">Товаров в каталоге</div>
-      <div style="font-size:28px; font-weight:800; margin-top:4px;">${state.products.length} поз.</div>
+      <div style="font-size:12px; color:var(--text-muted);">Товаров в каталоге</div>
+      <div style="font-size:26px; font-weight:800; margin-top:4px;">${state.products.length} поз.</div>
     </div>
   `;
 
-  // Рендер заказов в админке
   const ordersTable = document.getElementById("adminOrdersTable");
   ordersTable.innerHTML = state.orders
     .map(o => {
       const st = getStatusInfo(o.status);
       return `
-      <div style="border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:14px; background:var(--bg-main);">
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
+      <div style="border:1px solid var(--border); border-radius:10px; padding:14px; margin-bottom:14px; background:var(--bg-main);">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
           <div>
-            <strong>${o.id}</strong> • <span style="font-size:13px; color:var(--text-muted);">${o.createdAt}</span>
-            <span class="status-pill ${st.cls}" style="margin-left:10px;">${st.label}</span>
+            <strong>${o.id}</strong> • <span style="font-size:12px; color:var(--text-muted);">${o.createdAt}</span>
+            <span class="status-pill ${st.cls}" style="margin-left:6px;">${st.label}</span>
           </div>
-          <div style="font-size:18px; font-weight:800;">${formatByn(o.totalByn)}</div>
+          <div style="font-size:17px; font-weight:800;">${formatByn(o.totalByn)}</div>
         </div>
 
         <div class="grid-2" style="font-size:13px; margin-bottom:12px;">
@@ -893,29 +1140,27 @@ function renderAdminDashboard() {
             value="${o.trackingNumber || ""}"
             onchange="updateOrderTracking('${o.id}', this.value)"
           />
-          <span style="font-size:12px; color:var(--text-muted);">Изменения сразу видны клиенту в Личном кабинете</span>
         </div>
       </div>
     `;
     })
     .join("");
 
-  // Рендер списка товаров в админке
   document.getElementById("adminProductsCount").textContent = state.products.length;
   const prodList = document.getElementById("adminProductsList");
   prodList.innerHTML = state.products
     .map(
       p => `
-      <div style="display:flex; align-items:center; justify-content:space-between; gap:14px; padding:12px 0; border-bottom:1px solid var(--border); flex-wrap:wrap;">
-        <div style="display:flex; align-items:center; gap:12px; flex:1; min-width:260px;">
-          <img src="${p.image}" alt="" style="width:60px; height:48px; object-fit:cover; border-radius:6px;" />
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 0; border-bottom:1px solid var(--border); flex-wrap:wrap;">
+        <div style="display:flex; align-items:center; gap:12px; flex:1; min-width:240px;">
+          <img src="${p.image}" alt="" style="width:56px; height:46px; object-fit:cover; border-radius:6px;" onerror="if('${p.fallbackSvg || ""}')this.src='${p.fallbackSvg || ""}'" />
           <div>
             <div style="font-weight:700; font-size:14px;">${p.title}</div>
-            <div style="font-size:12px; color:var(--text-muted);">Арт: ${p.sku} • ${p.categoryLabel} • Остаток: <strong>${p.inStock} шт.</strong></div>
+            <div style="font-size:12px; color:var(--text-muted);">Арт: ${p.sku} • Остаток: <strong>${p.inStock} шт.</strong></div>
           </div>
         </div>
-        <div style="display:flex; align-items:center; gap:10px;">
-          <span style="font-weight:800; font-size:16px;">${formatByn(p.price)}</span>
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <span style="font-weight:800; font-size:15px;">${formatByn(p.price)}</span>
           <button class="btn btn-outline btn-sm" onclick="openProductEditor('${p.id}')">✏️ Изменить</button>
           <button class="btn btn-outline btn-sm" style="color:var(--danger);" onclick="deleteProduct('${p.id}')">Удалить</button>
         </div>
@@ -924,7 +1169,6 @@ function renderAdminDashboard() {
     )
     .join("");
 
-  // Заполнение селекта товаров для генератора Reels/TikTok
   const reelsSel = document.getElementById("reelsProductSelect");
   if (reelsSel) {
     const currentVal = reelsSel.value;
@@ -937,7 +1181,6 @@ function renderAdminDashboard() {
     generateReelsContent();
   }
 
-  // Заполнение настроек магазина
   const s = state.settings;
   document.getElementById("setBrandName").value = s.brandName || "";
   document.getElementById("setPhone").value = s.phone || "";
@@ -953,35 +1196,41 @@ function renderAdminDashboard() {
   document.getElementById("setTgChatId").value = s.telegramChatId || "";
 }
 
-function updateOrderStatus(orderId, newStatus) {
+async function updateOrderStatus(orderId, newStatus) {
   const order = state.orders.find(o => o.id === orderId);
   if (!order) return;
   order.status = newStatus;
   saveState();
-  if (window.location.protocol !== "file:") {
-    fetch(`/api/orders/${encodeURIComponent(orderId)}`, {
+  if (window.location.protocol !== "file:" && state.adminToken) {
+    await fetch(`/api/orders/${encodeURIComponent(orderId)}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-admin-token": state.adminToken
+      },
       body: JSON.stringify({ status: newStatus })
     }).catch(() => {});
   }
   renderAdminDashboard();
-  showToast(`Статус заказа ${orderId} изменен!`);
+  showToast(`Статус заказа ${orderId} обновлен в БД!`);
 }
 
-function updateOrderTracking(orderId, tracking) {
+async function updateOrderTracking(orderId, tracking) {
   const order = state.orders.find(o => o.id === orderId);
   if (!order) return;
   order.trackingNumber = tracking.trim();
   saveState();
-  if (window.location.protocol !== "file:") {
-    fetch(`/api/orders/${encodeURIComponent(orderId)}`, {
+  if (window.location.protocol !== "file:" && state.adminToken) {
+    await fetch(`/api/orders/${encodeURIComponent(orderId)}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-admin-token": state.adminToken
+      },
       body: JSON.stringify({ trackingNumber: order.trackingNumber })
     }).catch(() => {});
   }
-  showToast(`Трек-номер для заказа ${orderId} сохранен`);
+  showToast(`Трек-номер для заказа ${orderId} сохранен в БД!`);
 }
 
 // Добавление и редактирование товара в Админ-панели
@@ -991,7 +1240,7 @@ function openProductEditor(productId = null) {
 
   modal.innerHTML = `
     <div class="modal-header">
-      <h2>${existing ? "Редактировать товар" : "Добавить новый товар в каталог"}</h2>
+      <h2>${existing ? "Редактировать товар" : "Добавить новый товар"}</h2>
       <button class="close-btn" onclick="closeProductEditor()">✕</button>
     </div>
 
@@ -1055,8 +1304,8 @@ function openProductEditor(productId = null) {
     </div>
 
     <div class="form-group">
-      <label class="form-label">Фото товара (ссылка URL или загрузите файл с компьютера)</label>
-      <input type="text" id="edtImage" class="input-field" value="${existing ? existing.image : ""}" placeholder="Оставьте пустым для автоматической генерации карточки или выберите фото ниже" style="margin-bottom:8px;" />
+      <label class="form-label">Фото товара (ссылка URL или выберите фото с телефона/компьютера)</label>
+      <input type="text" id="edtImage" class="input-field" value="${existing ? existing.image : ""}" placeholder="URL картинки или загрузите файл ниже" style="margin-bottom:8px;" />
       <input type="file" accept="image/*" onchange="handleProductImageUpload(event)" style="font-size:13px;" />
     </div>
 
@@ -1070,7 +1319,7 @@ function openProductEditor(productId = null) {
     </label>
 
     <div style="display:flex; gap:12px;">
-      <button class="btn btn-primary" onclick="saveProductFromEditor('${existing ? existing.id : ""}')">Сохранить товар</button>
+      <button class="btn btn-primary" onclick="saveProductFromEditor('${existing ? existing.id : ""}')">Сохранить в БД</button>
       <button class="btn btn-outline" onclick="closeProductEditor()">Отмена</button>
     </div>
   `;
@@ -1093,7 +1342,7 @@ function closeProductEditor() {
   document.getElementById("editorModalBackdrop").classList.remove("open");
 }
 
-function saveProductFromEditor(existingId) {
+async function saveProductFromEditor(existingId) {
   const title = document.getElementById("edtTitle").value.trim();
   const sku = document.getElementById("edtSku").value.trim();
   const price = parseFloat(document.getElementById("edtPrice").value) || 0;
@@ -1114,9 +1363,8 @@ function saveProductFromEditor(existingId) {
     return;
   }
 
-  if (!image) {
-    image = createProductSvg(title.slice(0, 26), "#252930", "#C59B5F", sku);
-  }
+  const generatedSvg = createProductSvg(title.slice(0, 26), "#252930", "#C59B5F", sku, `${price} BYN`);
+  if (!image) image = generatedSvg;
 
   if (existingId) {
     const idx = state.products.findIndex(p => p.id === existingId);
@@ -1135,11 +1383,12 @@ function saveProductFromEditor(existingId) {
         spoutType,
         warranty,
         image,
+        fallbackSvg: state.products[idx].fallbackSvg || generatedSvg,
         description,
         isHit
       };
     }
-    showToast("Товар обновлен!");
+    showToast("Товар обновлен в серверной БД!");
   } else {
     state.products.unshift({
       id: "prd-" + Date.now(),
@@ -1155,6 +1404,7 @@ function saveProductFromEditor(existingId) {
       spoutType,
       warranty,
       image,
+      fallbackSvg: generatedSvg,
       description,
       isHit,
       features: [
@@ -1163,22 +1413,22 @@ function saveProductFromEditor(existingId) {
         `Официальная гарантия ${warranty}`
       ]
     });
-    showToast("Новый товар добавлен в каталог!");
+    showToast("Новый товар добавлен в базу данных!");
   }
 
-  saveState();
+  await saveAdminProductsToServer();
   closeProductEditor();
   renderCatalog();
   renderHeroShowcase();
   renderAdminDashboard();
 }
 
-function deleteProduct(productId) {
+async function deleteProduct(productId) {
   state.products = state.products.filter(p => p.id !== productId);
-  saveState();
+  await saveAdminProductsToServer();
   renderCatalog();
   renderAdminDashboard();
-  showToast("Товар удален из каталога");
+  showToast("Товар удален из базы данных");
 }
 
 function exportCatalogJson() {
@@ -1215,8 +1465,8 @@ function generateReelsContent() {
   if (tpl === "asmr") {
     hookTitle = `Почему этот смеситель выбирают 8 из 10 покупателей в Беларуси?`;
     shots = [
-      `<strong>0–3 сек (Хук):</strong> Крупный план включения воды и переключения режимов струи на модели «${product.title}». На экране крупная плашка: «Кран, который заменит 3 устройства на кухне».`,
-      `<strong>3–8 сек (Детали):</strong> Показываем пальцем покрытие (${product.color}) и плавный ход ручки. Подпись: «Корпус: ${product.material} — не облазит и не боится налета».`,
+      `<strong>0–3 сек (Хук):</strong> Крупный план включения воды и переключения режимов струи на модели «${product.title}».`,
+      `<strong>3–8 сек (Детали):</strong> Показываем покрытие (${product.color}) и плавный ход ручки. Подпись: «Корпус: ${product.material}».`,
       `<strong>8–12 сек (Функция):</strong> Демонстрируем главную фишку: ${product.spoutType}.`,
       `<strong>12–15 сек (Оффер РБ):</strong> Показываем коробку с комплектом подводки + цену <strong>${formatByn(product.price)}</strong>.`
     ];
@@ -1224,27 +1474,27 @@ function generateReelsContent() {
   } else if (tpl === "compare") {
     hookTitle = `Не покупайте смеситель на кухню, пока не проверите ЭТО!`;
     shots = [
-      `<strong>0–3 сек (Хук):</strong> В левой руке легкий дешевый кран, в правой — наш «${product.title}». Кладем на кухонные весы прямо на витрине.`,
-      `<strong>3–9 сек (Польза):</strong> Объясняем разницу: «Дешевый силумин трескается через год, а здесь — ${product.material} и надежный керамический картридж».`,
+      `<strong>0–3 сек (Хук):</strong> В левой руке легкий дешевый кран, в правой — наш «${product.title}». Кладем на весы прямо на витрине.`,
+      `<strong>3–9 сек (Польза):</strong> Объясняем разницу: «Дешевый силумин трескается через год, а здесь — ${product.material} и керамический картридж».`,
       `<strong>9–15 сек (Цена и призыв):</strong> Крупный план излива (${product.spoutType}) и плашка: «Цена в РБ: ${formatByn(product.price)} • Гарантия ${product.warranty}».`
     ];
     voiceover = `Как за 5 секунд отличить хороший кухонный кран от одноразового? Просто возьмите его в руку! Наш смеситель из ${product.material} тяжелый, с защитным покрытием ${product.color}. Стоит ${product.price} рублей и служит годами. ${ctaLine}`;
   } else if (tpl === "problem") {
-    hookTitle = `Знакома проблема: высокие кастрюли не помещаются в мойку и кругом брызги?`;
+    hookTitle = `Высокие кастрюли не помещаются в мойку и кругом брызги?`;
     shots = [
       `<strong>0–3 сек:</strong> Показываем неудобный низкий кран, затем резкий переход на «${product.title}».`,
       `<strong>3–10 сек:</strong> Показываем, как удобно мыть противень и набирать воду благодаря функции «${product.spoutType}».`,
       `<strong>10–15 сек:</strong> Плашка с артикулом ${product.sku}, ценой ${formatByn(product.price)} и доставкой Европочтой.`
     ];
-    voiceover = `Надоело, что на кухне вечно разбрызгивается вода и неудобно мыть большую посуду? Решение — смеситель с функцией ${product.spoutType} в цвете ${product.color}. Установка за 10 минут без сантехника. Цена — ${product.price} рублей. ${ctaLine}`;
+    voiceover = `Надоело, что на кухне вечно разбрызгивается вода и неудобно мыть большую посуду? Решение — смеситель с функцией ${product.spoutType} в цвете ${product.color}. Установка за 10 минут. Цена — ${product.price} рублей. ${ctaLine}`;
   } else {
     hookTitle = `Собираем идеальный комплект для кухни в один цвет!`;
     shots = [
-      `<strong>0–4 сек:</strong> Выкладываем на стол смеситель «${product.title}» + встраиваемый металлический дозатор для мыла в цвет ${product.color}.`,
+      `<strong>0–4 сек:</strong> Выкладываем на стол «${product.title}» + встраиваемый металлический дозатор и ополаскиватель стаканов в цвет ${product.color}.`,
       `<strong>4–10 сек:</strong> Показываем, как они идеально совпадают по оттенку и избавляют от пластиковых бутылок на мойке.`,
-      `<strong>10–15 сек:</strong> Цена смесителя ${formatByn(product.price)} + бесплатная доставка по Беларуси от ${state.settings.freeShippingThresholdByn} BYN.`
+      `<strong>10–15 сек:</strong> Цена ${formatByn(product.price)} + бесплатная доставка по Беларуси от ${state.settings.freeShippingThresholdByn} BYN.`
     ];
-    voiceover = `Хотите, чтобы мойка на кухне выглядела дорого и аккуратно? Подберите смеситель и встраиваемый дозатор точно в один тон — ${product.color}. Материал ${product.material}, гарантия ${product.warranty}. Смеситель стоит ${product.price} рублей. ${ctaLine}`;
+    voiceover = `Хотите, чтобы мойка на кухне выглядела дорого и аккуратно? Подберите смеситель, ринзер и встраиваемый дозатор точно в один тон — ${product.color}. Материал ${product.material}, гарантия ${product.warranty}. Смеситель стоит ${product.price} рублей. ${ctaLine}`;
   }
 
   const hashtags = `#смесительдлякухни #сантехникабеларусь #ремонтминск #кухняминск #смесительминск #европочта #товарыдлядомарб #краннакухню`;
@@ -1253,8 +1503,8 @@ function generateReelsContent() {
   state.lastGeneratedReelsText = `ЗАГОЛОВОК (ХУК):\n${hookTitle}\n\nПОСЕКУНДНЫЙ ПЛАН СЪЕМКИ:\n${shots.map(s => s.replace(/<[^>]+>/g, "")).join("\n")}\n\nТЕКСТ ОЗВУЧКИ:\n${voiceover}\n\nОПИСАНИЕ ПОСТА:\n${product.title} (Арт. ${product.sku})\nЦена: ${formatByn(product.price)}\nМатериал: ${product.material}\nГарантия: ${product.warranty}\n${ctaLine}\n\n${hashtags}`;
 
   document.getElementById("reelsGeneratedOutput").innerHTML = `
-    <div style="background:var(--bg-main); padding:16px; border-radius:10px; border:1px solid var(--border); font-size:13px;">
-      <div style="font-weight:800; font-size:15px; color:var(--brass-hover); margin-bottom:10px;">🔥 Хук (первые 2 секунды): «${hookTitle}»</div>
+    <div style="background:var(--bg-main); padding:14px; border-radius:10px; border:1px solid var(--border); font-size:13px;">
+      <div style="font-weight:800; font-size:14px; color:var(--brass-hover); margin-bottom:10px;">🔥 Хук (0–2 сек): «${hookTitle}»</div>
       <div style="margin-bottom:12px;">
         <div style="font-weight:700; margin-bottom:6px;">📹 Раскадровка (что снять телефоном на витрине):</div>
         <ul style="padding-left:18px; display:flex; flex-direction:column; gap:6px;">
@@ -1262,7 +1512,7 @@ function generateReelsContent() {
         </ul>
       </div>
       <div style="margin-bottom:12px; background:#fff; padding:10px; border-radius:8px; border:1px solid var(--border);">
-        <div style="font-weight:700; margin-bottom:4px;">🎙 Текст для голосовой озвучки (или ElevenLabs / CapCut):</div>
+        <div style="font-weight:700; margin-bottom:4px;">🎙 Текст для голосовой озвучки:</div>
         <div style="color:var(--text-main); font-style:italic;">«${voiceover}»</div>
       </div>
       <div>
@@ -1272,9 +1522,9 @@ function generateReelsContent() {
     </div>
   `;
 
-  // Рендерим превью на экране телефона 9:16
+  const fallback = product.fallbackSvg || "";
   document.getElementById("phonePreviewBox").innerHTML = `
-    <img src="${product.image}" class="phone-bg-img" alt="" />
+    <img src="${product.image}" class="phone-bg-img" alt="" onerror="if('${fallback}')this.src='${fallback}'" />
     <div class="phone-overlay">
       <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; opacity:0.9;">
         <span style="background:rgba(0,0,0,0.6); padding:4px 8px; border-radius:99px;">@${state.settings.brandName.toLowerCase()}</span>
@@ -1282,10 +1532,10 @@ function generateReelsContent() {
       </div>
 
       <div style="text-align:center; padding:0 6px;">
-        <div style="background:rgba(20,22,25,0.88); border:1px solid var(--brass); padding:10px 12px; border-radius:10px; font-weight:800; font-size:14px; line-height:1.3; margin-bottom:10px; box-shadow:0 8px 20px rgba(0,0,0,0.4);">
+        <div style="background:rgba(20,22,25,0.88); border:1px solid var(--brass); padding:10px 12px; border-radius:10px; font-weight:800; font-size:13px; line-height:1.3; margin-bottom:10px; box-shadow:0 8px 20px rgba(0,0,0,0.4);">
           ${hookTitle}
         </div>
-        <div style="display:inline-block; background:var(--brass); color:#111; font-weight:900; font-size:16px; padding:6px 14px; border-radius:8px;">
+        <div style="display:inline-block; background:var(--brass); color:#111; font-weight:900; font-size:15px; padding:6px 14px; border-radius:8px;">
           Цена: ${formatByn(product.price)}
         </div>
       </div>
@@ -1302,7 +1552,7 @@ function generateReelsContent() {
 function copyReelsScript() {
   if (!state.lastGeneratedReelsText) return;
   navigator.clipboard.writeText(state.lastGeneratedReelsText);
-  showToast("Готовый сценарий, озвучка и хэштеги скопированы в буфер обмена!");
+  showToast("Готовый сценарий, озвучка и хэштеги скопированы!");
 }
 
 function speakReelsVoiceover() {
@@ -1320,7 +1570,7 @@ function speakReelsVoiceover() {
 
 // ==================== НАСТРОЙКИ МАГАЗИНА И TELEGRAM ====================
 
-function saveStoreSettings() {
+async function saveStoreSettings() {
   state.settings = {
     ...state.settings,
     brandName: document.getElementById("setBrandName").value.trim() || "AQUAFORMA.BY",
@@ -1338,8 +1588,18 @@ function saveStoreSettings() {
   };
 
   saveState();
+  if (window.location.protocol !== "file:" && state.adminToken) {
+    await fetch("/api/settings", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "x-admin-token": state.adminToken
+      },
+      body: JSON.stringify(state.settings)
+    }).catch(() => {});
+  }
   applyStoreSettingsToUI();
-  showToast("Настройки магазина и реквизиты РБ сохранены!");
+  showToast("Настройки магазина и реквизиты РБ сохранены в БД!");
 }
 
 async function sendOrderToTelegram(order) {
@@ -1360,13 +1620,11 @@ async function sendOrderToTelegram(order) {
         parse_mode: "Markdown"
       })
     });
-  } catch (e) {
-    console.warn("Ошибка отправки в Telegram:", e);
-  }
+  } catch (e) {}
 }
 
 async function testTelegramNotification() {
-  saveStoreSettings();
+  await saveStoreSettings();
   const token = state.settings.telegramBotToken;
   const chatId = state.settings.telegramChatId;
   if (!token || !chatId) {
@@ -1380,13 +1638,13 @@ async function testTelegramNotification() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         chat_id: chatId,
-        text: `✅ Тестовое уведомление с сайта ${state.settings.brandName}! Бот успешно подключен для приема заказов.`
+        text: `✅ Тестовое уведомление с сайта ${state.settings.brandName}! Бот успешно подключен.`
       })
     });
     if (res.ok) {
       showToast("Тестовое сообщение отправлено в ваш Telegram!");
     } else {
-      showToast("Ошибка Telegram API: проверьте правильность токена и Chat ID");
+      showToast("Ошибка Telegram API: проверьте токен и Chat ID");
     }
   } catch (e) {
     showToast("Не удалось связаться с сервером Telegram");

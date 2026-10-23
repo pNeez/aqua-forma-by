@@ -325,7 +325,7 @@ const DEFAULT_PRODUCTS = [
     warranty: "1 год",
     inStock: 45,
     isHit: true,
-    image: createProductSvg("Аэратор 720° Латунь", "#4B5260", "#C59B5F", "ТОП ПРОДАЖ TIKTOK", "29 BYN"),
+    image: "https://images.unsplash.com/photo-1584622781564-1d987f7333c1?auto=format&fit=crop&w=900&q=80",
     fallbackSvg: createProductSvg("Аэратор 720° Латунь", "#4B5260", "#C59B5F", "ТОП ПРОДАЖ TIKTOK", "29 BYN"),
     description: "Двухшарнирная латунная насадка-аэратор с вращением на 720 градусов. Позволяет направить воду вверх (удобно умываться или споласкивать рот) и обмывать стенки раковины.",
     features: [
@@ -372,3 +372,11 @@ const DEFAULT_ORDERS = [
     ]
   }
 ];
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    DEFAULT_STORE_SETTINGS,
+    DEFAULT_PRODUCTS,
+    DEFAULT_ORDERS
+  };
+}
